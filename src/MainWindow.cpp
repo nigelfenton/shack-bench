@@ -118,7 +118,10 @@ void MainWindow::buildUI()
         auto* lp = new QLabel("PORT"); lp->setStyleSheet(kCaptionStyle);
         m_portSpin = new QSpinBox;
         m_portSpin->setRange(1, 65535);
-        m_portSpin->setValue(50001);
+        // AetherSDR's TCI default is 40001.  ExpertSDR2 / SunSDR use 50001.
+        // Since AetherSDR is the most common target here, default to 40001
+        // and let the user override in the spinbox.
+        m_portSpin->setValue(40001);
 
         m_connectBtn    = new QPushButton("Connect");
         m_disconnectBtn = new QPushButton("Disconnect");

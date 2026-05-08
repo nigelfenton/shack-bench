@@ -13,7 +13,7 @@ protocol.
 ## Features
 
 - Connect to any TCI server over WebSocket — host + port, defaults to
-  `127.0.0.1:50001`
+  `127.0.0.1:40001` (AetherSDR's TCI default; ExpertSDR2 / SunSDR use 50001)
 - Real-time scrolling log of every message received, with timestamps
 - Parsed views in the side panel:
   - **Current VFO / mode** — updated as the radio is tuned
