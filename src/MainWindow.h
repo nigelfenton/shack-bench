@@ -13,12 +13,13 @@
 // emits raw lines and we slice them into structured forms here.
 
 #include <QMainWindow>
+#include <QSet>
+#include <QString>
 
 class QLineEdit;
 class QSpinBox;
 class QPushButton;
 class QLabel;
-class QPlainTextEdit;
 class QTableWidget;
 class QCheckBox;
 
@@ -41,6 +42,10 @@ private slots:
     void onSaveLog();
     void onClearLog();
     void onFilterChanged(const QString& text);
+    void onPauseToggled(bool checked);
+    void onLogContextMenu(const QPoint& pos);
+    void onShowSuppressions();
+    void onClearSuppressions();
 
 private:
     void buildUI();
@@ -68,10 +73,17 @@ private:
     QLabel*       m_curMode{};
     QTableWidget* m_spotTable{};
 
-    // Raw log
-    QPlainTextEdit* m_logView{};
-    QLineEdit*      m_filterEdit{};
-    QCheckBox*      m_autoscrollCheck{};
+    // Raw log — table so we can right-click rows and suppress message
+    // types that flood the stream (rx_smeter etc).
+    QTableWidget*  m_logTable{};
+    QLineEdit*     m_filterEdit{};
+    QCheckBox*     m_autoscrollCheck{};
+    QPushButton*   m_pauseBtn{};
+    QLabel*        m_suppressLabel{};
+    QPushButton*   m_clearSuppressBtn{};
+
+    bool           m_paused{false};
+    QSet<QString>  m_suppressed;          // lowercase cmd names to drop
 
     // Action row
     QPushButton* m_saveBtn{};

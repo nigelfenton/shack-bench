@@ -4,13 +4,16 @@
 
 #include <QCheckBox>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QSplitter>
@@ -19,8 +22,6 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QTextCharFormat>
-#include <QTextCursor>
 #include <QVBoxLayout>
 #include <QFile>
 #include <QTextStream>
@@ -200,6 +201,7 @@ void MainWindow::buildUI()
         rv->setContentsMargins(4, 4, 4, 4);
         rv->setSpacing(4);
 
+        // First control row: title + filter + autoscroll + pause
         auto* topRow = new QHBoxLayout;
         auto* lr = new QLabel("RAW MESSAGES");
         lr->setStyleSheet(kCaptionStyle);
@@ -210,21 +212,56 @@ void MainWindow::buildUI()
                 this, &MainWindow::onFilterChanged);
         m_autoscrollCheck = new QCheckBox("Autoscroll");
         m_autoscrollCheck->setChecked(true);
+        m_pauseBtn = new QPushButton("Pause");
+        m_pauseBtn->setCheckable(true);
+        m_pauseBtn->setStyleSheet(
+            "QPushButton:checked { background: #003040; "
+            "border: 1px solid #ffaa00; color: #ffaa00; }");
+        connect(m_pauseBtn, &QPushButton::toggled,
+                this, &MainWindow::onPauseToggled);
         topRow->addWidget(lr);
         topRow->addStretch();
         topRow->addWidget(m_filterEdit);
         topRow->addWidget(m_autoscrollCheck);
+        topRow->addWidget(m_pauseBtn);
         rv->addLayout(topRow);
 
-        m_logView = new QPlainTextEdit;
-        m_logView->setReadOnly(true);
-        m_logView->setMaximumBlockCount(50000);   // bound memory for long sessions
-        m_logView->setStyleSheet(
-            "QPlainTextEdit { background-color: #050a14; color: #dde6f0; "
-            "border: 1px solid #1c2a40; "
+        // Second control row: suppression status
+        auto* supRow = new QHBoxLayout;
+        m_suppressLabel = new QLabel("0 suppressions");
+        m_suppressLabel->setStyleSheet(kCaptionStyle);
+        m_clearSuppressBtn = new QPushButton("Show / clear…");
+        m_clearSuppressBtn->setEnabled(false);
+        connect(m_clearSuppressBtn, &QPushButton::clicked,
+                this, &MainWindow::onShowSuppressions);
+        supRow->addStretch();
+        supRow->addWidget(m_suppressLabel);
+        supRow->addWidget(m_clearSuppressBtn);
+        rv->addLayout(supRow);
+
+        m_logTable = new QTableWidget;
+        m_logTable->setColumnCount(3);
+        m_logTable->setHorizontalHeaderLabels({"Time", "Cmd", "Message"});
+        m_logTable->verticalHeader()->setVisible(false);
+        m_logTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        m_logTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_logTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_logTable->horizontalHeader()->setStretchLastSection(true);
+        m_logTable->horizontalHeader()->setMinimumSectionSize(60);
+        m_logTable->setColumnWidth(0, 100);
+        m_logTable->setColumnWidth(1, 110);
+        m_logTable->setShowGrid(false);
+        m_logTable->setAlternatingRowColors(true);
+        m_logTable->setStyleSheet(
+            "QTableWidget { background-color: #050a14; "
+            "alternate-background-color: #0a1320; "
+            "color: #dde6f0; border: 1px solid #1c2a40; "
             "font-family: Consolas, 'Cascadia Mono', monospace; "
-            "font-size: 11px; }");
-        rv->addWidget(m_logView, 1);
+            "font-size: 11px; gridline-color: transparent; }");
+        m_logTable->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_logTable, &QTableWidget::customContextMenuRequested,
+                this, &MainWindow::onLogContextMenu);
+        rv->addWidget(m_logTable, 1);
 
         split->addWidget(right);
     }
@@ -406,32 +443,48 @@ void MainWindow::handleSpotClear()
 
 void MainWindow::appendLog(const QString& line, const QString& colorHex)
 {
-    // Apply the filter — if non-empty and the line doesn't match, skip.
+    // Hard drops first — these don't even bump the visible row.
+    if (m_paused) return;
+
+    const int colon = line.indexOf(':');
+    const QString cmd = (colon < 0 ? line : line.left(colon)).trimmed().toLower();
+    if (m_suppressed.contains(cmd)) return;
+
     const QString filter = m_filterEdit->text().trimmed();
     if (!filter.isEmpty() && !line.contains(filter, Qt::CaseInsensitive)) {
         return;
     }
 
+    // Bound memory for long sessions — keep a rolling window of 50k rows.
+    constexpr int kMaxRows = 50000;
+    if (m_logTable->rowCount() >= kMaxRows) {
+        m_logTable->removeRow(0);
+    }
+
+    const int row = m_logTable->rowCount();
+    m_logTable->insertRow(row);
+
     const QString ts = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
-    QTextCharFormat fmt;
-    fmt.setForeground(QColor(colorHex));
-
-    QTextCursor c{m_logView->document()};
-    c.movePosition(QTextCursor::End);
-
-    QTextCharFormat tsFmt;
-    tsFmt.setForeground(QColor("#6b8099"));
-    c.insertText(ts + "  ", tsFmt);
-    c.insertText(line + "\n", fmt);
+    auto* tsItem  = new QTableWidgetItem(ts);
+    auto* cmdItem = new QTableWidgetItem(cmd);
+    auto* msgItem = new QTableWidgetItem(line);
+    const QColor color{colorHex};
+    const QColor tsColor{"#6b8099"};
+    tsItem->setForeground(tsColor);
+    cmdItem->setForeground(color);
+    msgItem->setForeground(color);
+    m_logTable->setItem(row, 0, tsItem);
+    m_logTable->setItem(row, 1, cmdItem);
+    m_logTable->setItem(row, 2, msgItem);
 
     if (m_autoscrollCheck->isChecked()) {
-        m_logView->moveCursor(QTextCursor::End);
+        m_logTable->scrollToBottom();
     }
 }
 
 void MainWindow::onClearLog()
 {
-    m_logView->clear();
+    m_logTable->setRowCount(0);
     m_msgCount  = 0;
     m_spotCount = 0;
     refreshStatus();
@@ -453,15 +506,142 @@ void MainWindow::onSaveLog()
         return;
     }
     QTextStream out(&f);
-    out << m_logView->toPlainText();
+    for (int r = 0; r < m_logTable->rowCount(); ++r) {
+        out << m_logTable->item(r, 0)->text() << "  "
+            << m_logTable->item(r, 2)->text() << "\n";
+    }
     f.close();
 }
 
 void MainWindow::onFilterChanged(const QString&)
 {
-    // Filter applies to future appends (we don't reflow history — by design,
-    // since the log can be long).  Hint with a status-bar message.
-    statusBar()->showMessage("Filter applies to new lines — Clear to apply retroactively", 3000);
+    // Filter applies to future appends; existing rows stay put.  Tell the
+    // user via a brief status-bar nudge.
+    statusBar()->showMessage(
+        "Filter applies to new rows — use Clear to apply retroactively", 3000);
+}
+
+// ── Pause / suppress controls ──────────────────────────────────────────
+
+void MainWindow::onPauseToggled(bool checked)
+{
+    m_paused = checked;
+    m_pauseBtn->setText(checked ? "Paused — click to resume" : "Pause");
+    statusBar()->showMessage(checked ? "Paused — log freezes (parsed views still update)"
+                                     : "Resumed",
+                             2500);
+}
+
+void MainWindow::onLogContextMenu(const QPoint& pos)
+{
+    const auto rows = m_logTable->selectionModel()->selectedRows();
+    if (rows.isEmpty()) return;
+
+    // Pull the cmd of the row under the cursor (or the first selected row
+    // if the user right-clicked outside their selection).
+    const QModelIndex idx = m_logTable->indexAt(pos);
+    QString cmdHere;
+    if (idx.isValid()) {
+        auto* it = m_logTable->item(idx.row(), 1);
+        if (it) cmdHere = it->text();
+    }
+    if (cmdHere.isEmpty()) {
+        auto* it = m_logTable->item(rows.first().row(), 1);
+        if (it) cmdHere = it->text();
+    }
+
+    QMenu menu(this);
+    QAction* removeAct = menu.addAction(
+        rows.size() == 1 ? QString("Remove this row")
+                         : QString("Remove %1 selected rows").arg(rows.size()));
+    QAction* suppressAct = nullptr;
+    if (!cmdHere.isEmpty()) {
+        suppressAct = menu.addAction(
+            QString("Suppress all '%1' messages").arg(cmdHere));
+    }
+    menu.addSeparator();
+    QAction* showSupAct = menu.addAction("Show suppressions…");
+
+    QAction* chosen = menu.exec(m_logTable->viewport()->mapToGlobal(pos));
+    if (!chosen) return;
+
+    if (chosen == removeAct) {
+        // Remove rows in reverse so earlier indices stay valid.
+        QList<int> rowNums;
+        for (const auto& mi : rows) rowNums << mi.row();
+        std::sort(rowNums.begin(), rowNums.end(), std::greater<int>());
+        for (int r : rowNums) m_logTable->removeRow(r);
+    } else if (suppressAct && chosen == suppressAct) {
+        m_suppressed.insert(cmdHere);
+        // Also remove existing rows of this type for instant relief.
+        for (int r = m_logTable->rowCount() - 1; r >= 0; --r) {
+            auto* it = m_logTable->item(r, 1);
+            if (it && it->text() == cmdHere) m_logTable->removeRow(r);
+        }
+        m_suppressLabel->setText(QString("%1 suppression%2")
+                                     .arg(m_suppressed.size())
+                                     .arg(m_suppressed.size() == 1 ? "" : "s"));
+        m_clearSuppressBtn->setEnabled(true);
+    } else if (chosen == showSupAct) {
+        onShowSuppressions();
+    }
+}
+
+void MainWindow::onShowSuppressions()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle("Suppressed message types");
+    dlg.resize(360, 320);
+
+    auto* layout = new QVBoxLayout(&dlg);
+    auto* hint = new QLabel(
+        "These command prefixes are dropped before reaching the log.  "
+        "Select one or more and click Remove to start showing them again.");
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto* list = new QListWidget;
+    list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    QStringList items(m_suppressed.begin(), m_suppressed.end());
+    items.sort();
+    list->addItems(items);
+    layout->addWidget(list, 1);
+
+    auto* row = new QHBoxLayout;
+    auto* removeBtn = new QPushButton("Remove selected");
+    auto* clearBtn  = new QPushButton("Clear all");
+    auto* closeBtn  = new QPushButton("Close");
+    row->addWidget(removeBtn);
+    row->addWidget(clearBtn);
+    row->addStretch();
+    row->addWidget(closeBtn);
+    layout->addLayout(row);
+
+    connect(removeBtn, &QPushButton::clicked, &dlg, [&]() {
+        for (auto* it : list->selectedItems()) {
+            m_suppressed.remove(it->text());
+            delete list->takeItem(list->row(it));
+        }
+    });
+    connect(clearBtn, &QPushButton::clicked, &dlg, [&]() {
+        m_suppressed.clear();
+        list->clear();
+    });
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    dlg.exec();
+
+    m_suppressLabel->setText(QString("%1 suppression%2")
+                                 .arg(m_suppressed.size())
+                                 .arg(m_suppressed.size() == 1 ? "" : "s"));
+    m_clearSuppressBtn->setEnabled(!m_suppressed.isEmpty());
+}
+
+void MainWindow::onClearSuppressions()
+{
+    m_suppressed.clear();
+    m_suppressLabel->setText("0 suppressions");
+    m_clearSuppressBtn->setEnabled(false);
 }
 
 } // namespace TciMon
