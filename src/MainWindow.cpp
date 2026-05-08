@@ -342,7 +342,7 @@ void MainWindow::onRawMessage(const QString& line)
 
     QString color = kColorOther;
     if      (cmd == "vfo")           color = kColorVfo;
-    else if (cmd == "mode")          color = kColorMode;
+    else if (cmd == "mode" || cmd == "modulation") color = kColorMode;
     else if (cmd == "spot")          color = kColorSpot;
     else if (cmd == "spot_delete" || cmd == "spot_clear") color = kColorSpotDel;
     else if (cmd == "protocol" || cmd == "ready" || cmd == "start")
@@ -362,7 +362,7 @@ void MainWindow::parseLine(const QString& line)
     const QStringList args = rest.split(',', Qt::KeepEmptyParts);
 
     if      (cmd == "vfo")          handleVfo(args);
-    else if (cmd == "mode")         handleMode(args);
+    else if (cmd == "mode" || cmd == "modulation") handleMode(args);
     else if (cmd == "spot")         handleSpot(args);
     else if (cmd == "spot_delete")  handleSpotDelete(args);
     else if (cmd == "spot_clear")   handleSpotClear();
