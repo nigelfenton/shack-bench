@@ -10,6 +10,21 @@ mode, spots).  Useful when you're debugging a TCI client, exploring what
 events a server emits in a given workflow, or just curious about the wire
 protocol.
 
+## Download
+
+Pre-built binaries — including a Windows installer — are on the
+[**Releases page**](https://github.com/nigelfenton/tci-monitor/releases/latest):
+
+- **Windows installer** — `TciMonitor-Setup-<version>-windows-x64.exe`
+  (double-click to install)
+- **Windows portable zip** — `TciMonitor-<version>-windows-x64.zip`
+  (unzip and run `TciMonitor.exe`)
+- **Linux AppImage** — `TciMonitor-<version>-linux-x86_64.AppImage`
+  (`chmod +x` and run)
+- **macOS DMG (Apple Silicon)** — `TciMonitor-<version>-macos-arm64.dmg`
+
+Or build from source — see [Build](#build) below.
+
 ## Features
 
 - Connect to any TCI server over WebSocket — host + port, defaults to
