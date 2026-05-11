@@ -1,7 +1,11 @@
 #include "MainWindow.h"
 
+#include "CommandDescriptionDialog.h"
+#include "CommandsReferenceDialog.h"
 #include "TciClient.h"
+#include "TciCommands.h"
 
+#include <QAction>
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDialog>
@@ -13,6 +17,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
@@ -22,6 +27,8 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QVBoxLayout>
 #include <QFile>
 #include <QTextStream>
@@ -100,6 +107,15 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::buildUI()
 {
+    // Menu bar — only entry for now is the TCI command reference.
+    {
+        auto* help = menuBar()->addMenu("&Help");
+        auto* ref  = help->addAction("TCI &Commands…");
+        ref->setShortcut(QKeySequence::HelpContents);   // F1 on most platforms
+        connect(ref, &QAction::triggered,
+                this, &MainWindow::onShowCommandsReference);
+    }
+
     auto* central = new QWidget;
     setCentralWidget(central);
     auto* main = new QVBoxLayout(central);
@@ -563,7 +579,14 @@ void MainWindow::onLogContextMenu(const QPoint& pos)
             QString("Suppress all '%1' messages").arg(cmdHere));
     }
     menu.addSeparator();
+    QAction* describeAct = nullptr;
+    if (!cmdHere.isEmpty()) {
+        describeAct = menu.addAction(
+            QString("Description of '%1'…").arg(cmdHere));
+    }
+    menu.addSeparator();
     QAction* showSupAct = menu.addAction("Show suppressions…");
+    QAction* refAct     = menu.addAction("TCI commands reference…");
 
     QAction* chosen = menu.exec(m_logTable->viewport()->mapToGlobal(pos));
     if (!chosen) return;
@@ -585,8 +608,14 @@ void MainWindow::onLogContextMenu(const QPoint& pos)
                                      .arg(m_suppressed.size())
                                      .arg(m_suppressed.size() == 1 ? "" : "s"));
         m_clearSuppressBtn->setEnabled(true);
+    } else if (describeAct && chosen == describeAct) {
+        const TciCommand* cmd = findTciCommand(cmdHere);
+        CommandDescriptionDialog dlg(cmd, cmdHere, this);
+        dlg.exec();
     } else if (chosen == showSupAct) {
         onShowSuppressions();
+    } else if (chosen == refAct) {
+        onShowCommandsReference();
     }
 }
 
@@ -594,41 +623,74 @@ void MainWindow::onShowSuppressions()
 {
     QDialog dlg(this);
     dlg.setWindowTitle("Suppressed message types");
-    dlg.resize(360, 320);
+    dlg.resize(560, 360);
 
     auto* layout = new QVBoxLayout(&dlg);
     auto* hint = new QLabel(
         "These command prefixes are dropped before reaching the log.  "
-        "Select one or more and click Remove to start showing them again.");
+        "Select one or more and click Remove to start showing them again. "
+        "Double-click a row to see the full description.");
     hint->setWordWrap(true);
     layout->addWidget(hint);
 
-    auto* list = new QListWidget;
-    list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    auto* tree = new QTreeWidget;
+    tree->setColumnCount(2);
+    tree->setHeaderLabels({"Command", "Description"});
+    tree->setRootIsDecorated(false);
+    tree->setAlternatingRowColors(true);
+    tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    tree->header()->setStretchLastSection(true);
+    tree->setColumnWidth(0, 160);
+
     QStringList items(m_suppressed.begin(), m_suppressed.end());
     items.sort();
-    list->addItems(items);
-    layout->addWidget(list, 1);
+    for (const QString& name : items) {
+        auto* it = new QTreeWidgetItem(tree);
+        it->setText(0, name);
+        const TciCommand* cmd = findTciCommand(name);
+        it->setText(1, cmd ? cmd->summary
+                           : QStringLiteral("(no description on file)"));
+        if (!cmd) {
+            it->setForeground(1, QColor("#6b8099"));
+        }
+    }
+    layout->addWidget(tree, 1);
 
     auto* row = new QHBoxLayout;
-    auto* removeBtn = new QPushButton("Remove selected");
-    auto* clearBtn  = new QPushButton("Clear all");
-    auto* closeBtn  = new QPushButton("Close");
+    auto* describeBtn = new QPushButton("Describe…");
+    auto* removeBtn   = new QPushButton("Remove selected");
+    auto* clearBtn    = new QPushButton("Clear all");
+    auto* closeBtn    = new QPushButton("Close");
+    row->addWidget(describeBtn);
+    row->addSpacing(12);
     row->addWidget(removeBtn);
     row->addWidget(clearBtn);
     row->addStretch();
     row->addWidget(closeBtn);
     layout->addLayout(row);
 
+    auto describeSelected = [this, &dlg, tree]() {
+        auto sel = tree->selectedItems();
+        if (sel.isEmpty()) return;
+        const QString name = sel.first()->text(0);
+        const TciCommand* cmd = findTciCommand(name);
+        CommandDescriptionDialog desc(cmd, name, &dlg);
+        desc.exec();
+    };
+
+    connect(describeBtn, &QPushButton::clicked, &dlg, describeSelected);
+    connect(tree, &QTreeWidget::itemDoubleClicked, &dlg,
+            [describeSelected](QTreeWidgetItem*, int) { describeSelected(); });
+
     connect(removeBtn, &QPushButton::clicked, &dlg, [&]() {
-        for (auto* it : list->selectedItems()) {
-            m_suppressed.remove(it->text());
-            delete list->takeItem(list->row(it));
+        for (auto* it : tree->selectedItems()) {
+            m_suppressed.remove(it->text(0));
+            delete tree->takeTopLevelItem(tree->indexOfTopLevelItem(it));
         }
     });
     connect(clearBtn, &QPushButton::clicked, &dlg, [&]() {
         m_suppressed.clear();
-        list->clear();
+        tree->clear();
     });
     connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
 
@@ -645,6 +707,12 @@ void MainWindow::onClearSuppressions()
     m_suppressed.clear();
     m_suppressLabel->setText("0 suppressions");
     m_clearSuppressBtn->setEnabled(false);
+}
+
+void MainWindow::onShowCommandsReference()
+{
+    CommandsReferenceDialog dlg(this);
+    dlg.exec();
 }
 
 } // namespace TciMon

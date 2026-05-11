@@ -46,6 +46,7 @@ private slots:
     void onLogContextMenu(const QPoint& pos);
     void onShowSuppressions();
     void onClearSuppressions();
+    void onShowCommandsReference();
 
 private:
     void buildUI();

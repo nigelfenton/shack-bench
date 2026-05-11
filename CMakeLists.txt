@@ -29,6 +29,12 @@ set(TCIMON_SOURCES
     src/MainWindow.h
     src/TciClient.cpp
     src/TciClient.h
+    src/TciCommands.cpp
+    src/TciCommands.h
+    src/CommandDescriptionDialog.cpp
+    src/CommandDescriptionDialog.h
+    src/CommandsReferenceDialog.cpp
+    src/CommandsReferenceDialog.h
 )
 
 if(WIN32)
