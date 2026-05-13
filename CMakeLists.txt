@@ -19,6 +19,7 @@ endif()
 find_package(Qt6 6.2 REQUIRED COMPONENTS
     Core
     Gui
+    Network
     Widgets
     WebSockets
 )
@@ -35,6 +36,10 @@ set(TCIMON_SOURCES
     src/CommandDescriptionDialog.h
     src/CommandsReferenceDialog.cpp
     src/CommandsReferenceDialog.h
+    src/MdnsBrowser.cpp
+    src/MdnsBrowser.h
+    src/DiscoveryDialog.cpp
+    src/DiscoveryDialog.h
 )
 
 if(WIN32)
@@ -49,6 +54,7 @@ target_include_directories(TciMonitor PRIVATE src)
 target_link_libraries(TciMonitor PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Widgets
     Qt6::WebSockets
 )

@@ -47,6 +47,7 @@ private slots:
     void onShowSuppressions();
     void onClearSuppressions();
     void onShowCommandsReference();
+    void onDiscoverClicked();
 
 private:
     void buildUI();
@@ -66,6 +67,7 @@ private:
     QSpinBox*    m_portSpin{};
     QPushButton* m_connectBtn{};
     QPushButton* m_disconnectBtn{};
+    QPushButton* m_discoverBtn{};
     QLabel*      m_statusDot{};
     QLabel*      m_statusText{};
 

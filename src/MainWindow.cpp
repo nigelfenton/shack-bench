@@ -2,6 +2,7 @@
 
 #include "CommandDescriptionDialog.h"
 #include "CommandsReferenceDialog.h"
+#include "DiscoveryDialog.h"
 #include "TciClient.h"
 #include "TciCommands.h"
 
@@ -142,8 +143,12 @@ void MainWindow::buildUI()
         m_connectBtn    = new QPushButton("Connect");
         m_disconnectBtn = new QPushButton("Disconnect");
         m_disconnectBtn->setEnabled(false);
+        m_discoverBtn   = new QPushButton(QStringLiteral("Discover…"));
+        m_discoverBtn->setToolTip(tr("Browse the LAN for TCI peripherals "
+                                     "advertising under _tci._tcp.local"));
         connect(m_connectBtn,    &QPushButton::clicked, this, &MainWindow::onConnectClicked);
         connect(m_disconnectBtn, &QPushButton::clicked, this, &MainWindow::onDisconnectClicked);
+        connect(m_discoverBtn,   &QPushButton::clicked, this, &MainWindow::onDiscoverClicked);
 
         m_statusDot  = new QLabel("●");
         m_statusDot->setStyleSheet(kStatusOffline);
@@ -157,6 +162,8 @@ void MainWindow::buildUI()
         row->addSpacing(8);
         row->addWidget(m_connectBtn);
         row->addWidget(m_disconnectBtn);
+        row->addSpacing(8);
+        row->addWidget(m_discoverBtn);
         row->addStretch();
         row->addWidget(m_statusDot);
         row->addWidget(m_statusText);
@@ -713,6 +720,21 @@ void MainWindow::onShowCommandsReference()
 {
     CommandsReferenceDialog dlg(this);
     dlg.exec();
+}
+
+void MainWindow::onDiscoverClicked()
+{
+    DiscoveryDialog dlg(this);
+    if (dlg.exec() == QDialog::Accepted) {
+        const QString host = dlg.chosenHost();
+        const quint16 port = dlg.chosenPort();
+        if (!host.isEmpty()) {
+            m_hostEdit->setText(host);
+            // Port 0 in the advertisement means "no TCI server" — keep the
+            // user's existing spinbox value rather than overwriting with 0.
+            if (port != 0) m_portSpin->setValue(port);
+        }
+    }
 }
 
 } // namespace TciMon
