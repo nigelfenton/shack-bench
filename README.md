@@ -34,9 +34,100 @@ Or build from source — see [Build](#build) below.
   - **Current VFO / mode** — updated as the radio is tuned
   - **Spot table** — every `spot:` event the server emits, with callsign,
     frequency, mode, and source (DX cluster / parks / RBN / etc.)
+  - **SWR scan** — captures an antenna SWR sweep over TCI, buckets it
+    per band, overlays bands, and exports CSV
 - Save the raw log to a file for offline analysis
-- Filter / search the message stream
+- Filter / search the message stream, suppress flooding command types
 - Auto-reconnect with backoff if the connection drops
+- A **toolkit** of diagnostic tabs (see below) for deeper work
+
+## Toolkit tabs
+
+As of v0.3 the window is a tabbed workbench.  The **Monitor** tab is the
+classic view above; the connect bar at the top is shared by the tabs
+that observe the live connection.
+
+### Inspect
+
+A structured fold of the stream: one row per command instead of a flat
+scroll.  For each command you get a live **count**, a smoothed
+**rate/min**, the most-recent **value**, the reference **syntax**, and an
+advisory **compliance** flag:
+
+- `ok` — argument count looks consistent with the reference syntax
+- `few args (N<M)` — fewer arguments than the syntax declares (suspect)
+- `unknown cmd` — not in the built-in command reference (vendor-specific
+  or new); informational, not an error
+
+Purely passive — it never sends anything.  "Reset stats" clears the
+table.
+
+### Console
+
+A free-text TCI command sender.  This is the **only** part of TCI
+Monitor that can key your radio, so it is deliberately defensive:
+
+- **Dry-run by default.**  The arm state is *not* remembered — it resets
+  to OFF every launch.  Unarmed, a command is only logged as
+  "would send", never transmitted.
+- **TX-class confirm.**  `trx` / `tune` require a second explicit
+  confirmation even when armed.
+- **Watchdog.**  Keying a carrier starts a watchdog that auto-sends
+  `trx:0,false; tune:0,false;` if SWR exceeds the configured limit or
+  TX persists past the timeout.
+- **UNKEY NOW.**  Always available while armed; sends the same
+  unkey pair on demand.
+
+Command-name autocomplete is driven by the built-in reference table.
+Replies arriving shortly after a send are echoed into the transcript so
+they line up with the command that caused them.
+
+### Compare
+
+Connects 2–4 **independent, read-only** observers, each with its own
+host/port — so you can compare:
+
+- **same server, N observers** — "do all clients see identical frames?"
+- **cross-server** — "how do two radios' dialects differ?" (e.g.
+  AetherSDR `:40001` vs SunSDR `:50001`)
+
+The **value matrix** shows one row per command and one column per
+observer; rows where observers disagree are flagged red.  A merged,
+colour-coded stream log underneath gives the timeline.
+
+### Replay
+
+Record the live stream to a capture file, and replay any capture back
+as a **local TCI server** so another client (WSJT-X, a logger, a second
+TCI Monitor) can connect to it offline — no radio involved.
+
+- **Record** writes a `.tcicap` file (format below).
+- **Replay** stands up a `QWebSocketServer` on the chosen port and feeds
+  the file with its original inter-message timing.  Speed factor scales
+  the timing; Loop restarts at the end.  It also accepts a plain saved
+  raw log (timestamps are stripped and a fixed gap is used).
+
+## Capture file format
+
+A `.tcicap` file is plain UTF-8 text:
+
+```
+# tcimon-capture v1  2026-05-18T14:32:01
+0	protocol:AetherSDR,0.9
+12	ready
+48	vfo:0,0,14074000
+...
+```
+
+- The first line is a `#` comment header with the ISO-8601 capture time.
+  Any line starting with `#` is ignored on replay.
+- Each data line is `<delayMs>` + a TAB + the raw TCI message (no
+  trailing `;` — replay re-adds it).  `delayMs` is the gap since the
+  previous recorded line; the first line is `0`.
+
+Because the format is just delay-prefixed lines, a saved raw log
+(`Save log…`) also replays — its `HH:mm:ss.zzz` prefix is detected and
+stripped, and lines play with a fixed default gap.
 
 ## Build
 
