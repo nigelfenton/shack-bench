@@ -30,6 +30,8 @@ set(TCIMON_SOURCES
     src/MainWindow.h
     src/TciClient.cpp
     src/TciClient.h
+    src/SwrPlot.cpp
+    src/SwrPlot.h
     src/TciCommands.cpp
     src/TciCommands.h
     src/CommandDescriptionDialog.cpp

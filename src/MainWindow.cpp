@@ -3,6 +3,7 @@
 #include "CommandDescriptionDialog.h"
 #include "CommandsReferenceDialog.h"
 #include "DiscoveryDialog.h"
+#include "SwrPlot.h"
 #include "TciClient.h"
 #include "TciCommands.h"
 
@@ -24,6 +25,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QTabWidget>
 #include <QStatusBar>
 #include <QStringList>
 #include <QTableWidget>
@@ -97,6 +99,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     buildUI();
     restoreSuppressions();   // re-apply last run's suppression filters
+    restoreSweeps();         // re-load persisted per-band SWR sweeps
 
     connect(m_tci, &TciClient::connectionChanged, this, &MainWindow::onConnectionChanged);
     connect(m_tci, &TciClient::rawMessageReceived, this, &MainWindow::onRawMessage);
@@ -213,22 +216,54 @@ void MainWindow::buildUI()
         hdr->addStretch();
         lv->addLayout(hdr);
 
-        auto* lst = new QLabel("SPOTS");
-        lst->setStyleSheet(kCaptionStyle);
-        lv->addWidget(lst);
+        m_leftTabs = new QTabWidget;
 
-        m_spotTable = new QTableWidget;
-        m_spotTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        m_spotTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-        m_spotTable->setSelectionMode(QAbstractItemView::SingleSelection);
-        m_spotTable->setAlternatingRowColors(true);
-        m_spotTable->verticalHeader()->setVisible(false);
-        m_spotTable->setColumnCount(6);
-        m_spotTable->setHorizontalHeaderLabels(
-            {"Time", "Call", "Mode", "Freq (MHz)", "Color", "Description"});
-        m_spotTable->horizontalHeader()->setStretchLastSection(true);
-        lv->addWidget(m_spotTable, 1);
+        // ── Tab 1: Spots ───────────────────────────────────────────────
+        {
+            auto* spotsTab = new QWidget;
+            auto* sv = new QVBoxLayout(spotsTab);
+            sv->setContentsMargins(2, 2, 2, 2);
+            sv->setSpacing(4);
 
+            m_spotTable = new QTableWidget;
+            m_spotTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            m_spotTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+            m_spotTable->setSelectionMode(QAbstractItemView::SingleSelection);
+            m_spotTable->setAlternatingRowColors(true);
+            m_spotTable->verticalHeader()->setVisible(false);
+            m_spotTable->setColumnCount(6);
+            m_spotTable->setHorizontalHeaderLabels(
+                {"Time", "Call", "Mode", "Freq (MHz)", "Color", "Description"});
+            m_spotTable->horizontalHeader()->setStretchLastSection(true);
+            sv->addWidget(m_spotTable, 1);
+
+            m_leftTabs->addTab(spotsTab, "Spots");
+        }
+
+        // ── Tab 2: SWR scan ────────────────────────────────────────────
+        {
+            auto* swrTab = new QWidget;
+            auto* wv = new QVBoxLayout(swrTab);
+            wv->setContentsMargins(2, 2, 2, 2);
+            wv->setSpacing(4);
+
+            auto* bandRowW = new QWidget;
+            m_bandBtnLayout = new QHBoxLayout(bandRowW);
+            m_bandBtnLayout->setContentsMargins(0, 0, 0, 0);
+            m_bandBtnLayout->setSpacing(4);
+            auto* bl = new QLabel("BANDS");
+            bl->setStyleSheet(kCaptionStyle);
+            m_bandBtnLayout->addWidget(bl);
+            m_bandBtnLayout->addStretch();
+            wv->addWidget(bandRowW);
+
+            m_swrPlot = new SwrPlot;
+            wv->addWidget(m_swrPlot, 1);
+
+            m_leftTabs->addTab(swrTab, "SWR scan");
+        }
+
+        lv->addWidget(m_leftTabs, 1);
         split->addWidget(left);
     }
 
@@ -439,11 +474,9 @@ void MainWindow::handleTrx(const QStringList& args)
         m_sweepStartStamp =
             QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
     } else if (state == "false") {
-        if (m_sweepActive && !m_sweepSwr.isEmpty()) {
-            m_lastSweep = m_sweepSwr;          // freeze for export
-            m_saveSweepBtn->setEnabled(true);
-        }
+        const bool had = m_sweepActive && !m_sweepSwr.isEmpty();
         m_sweepActive = false;
+        if (had) finalizeSweep();
     }
     refreshSweepUi();
 }
@@ -490,6 +523,164 @@ void MainWindow::refreshSweepUi()
         m_sweepLabel->setText(
             QString("done — %1 pts, min %2 @ %3 MHz  (Save SWR sweep…)")
                 .arg(src.size()).arg(minS, 0, 'f', 2).arg(minMhz));
+    }
+}
+
+// HF + 6 m band map. Returns "20m" etc., or a generic "%.3fMHz" bucket
+// for out-of-band sweeps so nothing is ever silently dropped.
+QString MainWindow::bandForHz(qint64 hz)
+{
+    const double m = hz / 1e6;
+    struct B { const char* n; double lo, hi; };
+    static const B bands[] = {
+        {"160m", 1.8,  2.0},  {"80m", 3.5,  4.0},  {"60m",  5.25, 5.45},
+        {"40m",  7.0,  7.3},  {"30m", 10.1, 10.15},{"20m",  13.9, 14.4},
+        {"17m",  18.0, 18.2}, {"15m", 20.9, 21.5}, {"12m",  24.8, 25.0},
+        {"10m",  28.0, 29.7}, {"6m",  50.0, 54.0},
+    };
+    for (const auto& b : bands)
+        if (m >= b.lo && m <= b.hi) return QString(b.n);
+    return QString("%1MHz").arg(m, 0, 'f', 3);
+}
+
+namespace {
+// Stable per-slot colour palette for overlaid band curves.
+QColor bandColor(int idx)
+{
+    static const char* pal[] = {
+        "#00d8ef", "#ffaa00", "#4cff7c", "#ff5cff",
+        "#ffe14c", "#ff5050", "#7c9cff", "#9cff00",
+    };
+    return QColor(pal[idx % 8]);
+}
+const QStringList kBandOrder = {
+    "160m","80m","60m","40m","30m","20m","17m","15m","12m","10m","6m"};
+int bandRank(const QString& b) {
+    int i = kBandOrder.indexOf(b);
+    return i < 0 ? 100 : i;             // unknown/out-of-band sort last
+}
+} // namespace
+
+void MainWindow::finalizeSweep()
+{
+    if (m_sweepSwr.isEmpty()) return;
+    // Band from the median sample (robust against edge stragglers).
+    QList<qint64> keys = m_sweepSwr.keys();
+    const qint64 medianHz = keys.at(keys.size() / 2);
+    const QString band = bandForHz(medianHz);
+
+    m_sweepsByBand[band]     = m_sweepSwr;
+    m_sweepStampByBand[band] = m_sweepStartStamp;
+    m_lastSweep              = m_sweepSwr;
+    m_lastSweepBand          = band;
+    m_saveSweepBtn->setEnabled(true);
+
+    persistSweeps();
+    rebuildBandButtons();
+    if (auto* b = m_bandButtons.value(band)) b->setChecked(true);
+    rebuildPlot();
+    if (m_leftTabs) m_leftTabs->setCurrentIndex(1);   // jump to SWR tab
+}
+
+void MainWindow::rebuildBandButtons()
+{
+    // Order present bands by the standard band sequence.
+    QStringList present = m_sweepsByBand.keys();
+    std::sort(present.begin(), present.end(),
+              [](const QString& a, const QString& b) {
+                  return bandRank(a) < bandRank(b);
+              });
+    for (const QString& band : present) {
+        if (m_bandButtons.contains(band)) continue;
+        auto* btn = new QPushButton(band);
+        btn->setCheckable(true);
+        btn->setMaximumWidth(64);
+        connect(btn, &QPushButton::toggled, this, &MainWindow::rebuildPlot);
+        // Insert before the trailing stretch (last layout item).
+        m_bandBtnLayout->insertWidget(m_bandBtnLayout->count() - 1, btn);
+        m_bandButtons.insert(band, btn);
+    }
+}
+
+void MainWindow::rebuildPlot()
+{
+    if (!m_swrPlot) return;
+    QStringList shown = m_bandButtons.keys();
+    std::sort(shown.begin(), shown.end(),
+              [](const QString& a, const QString& b) {
+                  return bandRank(a) < bandRank(b);
+              });
+    QVector<SwrPlot::Curve> curves;
+    int idx = 0;
+    for (const QString& band : shown) {
+        auto* btn = m_bandButtons.value(band);
+        if (!btn || !btn->isChecked()) { ++idx; continue; }
+        if (!m_sweepsByBand.contains(band)) { ++idx; continue; }
+        SwrPlot::Curve c;
+        c.band   = band;
+        c.color  = bandColor(idx);
+        c.points = m_sweepsByBand.value(band);
+        curves.push_back(c);
+        ++idx;
+    }
+    m_swrPlot->setCurves(curves);
+}
+
+void MainWindow::persistSweeps()
+{
+    QSettings s;
+    s.beginGroup("swrsweeps");
+    s.remove("");                                  // clear stale entries
+    s.setValue("bands", QStringList(m_sweepsByBand.keys()));
+    s.setValue("last", m_lastSweepBand);
+    for (auto it = m_sweepsByBand.begin(); it != m_sweepsByBand.end(); ++it) {
+        QStringList pts;
+        for (auto p = it.value().begin(); p != it.value().end(); ++p)
+            pts << QString("%1:%2").arg(p.key())
+                                   .arg(p.value(), 0, 'f', 2);
+        s.beginGroup(it.key());
+        s.setValue("points", pts.join('|'));
+        s.setValue("stamp",  m_sweepStampByBand.value(it.key()));
+        s.endGroup();
+    }
+    s.endGroup();
+}
+
+void MainWindow::restoreSweeps()
+{
+    QSettings s;
+    s.beginGroup("swrsweeps");
+    const QStringList bands = s.value("bands").toStringList();
+    m_lastSweepBand = s.value("last").toString();
+    for (const QString& band : bands) {
+        s.beginGroup(band);
+        const QString blob  = s.value("points").toString();
+        const QString stamp = s.value("stamp").toString();
+        s.endGroup();
+        QMap<qint64,double> pts;
+        const QStringList items = blob.split('|', Qt::SkipEmptyParts);
+        for (const QString& it : items) {
+            const int c = it.indexOf(':');
+            if (c < 0) continue;
+            bool okF = false, okS = false;
+            const qint64 hz  = it.left(c).toLongLong(&okF);
+            const double swr = it.mid(c + 1).toDouble(&okS);
+            if (okF && okS) pts[hz] = swr;
+        }
+        if (!pts.isEmpty()) {
+            m_sweepsByBand[band]     = pts;
+            m_sweepStampByBand[band] = stamp;
+        }
+    }
+    s.endGroup();
+
+    if (!m_sweepsByBand.isEmpty()) {
+        rebuildBandButtons();
+        for (auto* b : m_bandButtons) b->setChecked(true);  // show all history
+        if (m_sweepsByBand.contains(m_lastSweepBand))
+            m_lastSweep = m_sweepsByBand.value(m_lastSweepBand);
+        m_saveSweepBtn->setEnabled(true);
+        rebuildPlot();
     }
 }
 
@@ -644,14 +835,40 @@ void MainWindow::onSaveLog()
 
 void MainWindow::onSaveSweep()
 {
-    if (m_lastSweep.isEmpty()) {
+    if (m_sweepsByBand.isEmpty()) {
         QMessageBox::information(this, "No sweep",
             "No completed SWR sweep captured yet. Run an antenna SWR sweep "
             "in AetherSDR with TCI Monitor connected, then try again.");
         return;
     }
+    // Export the band(s) currently ticked on the SWR tab.
+    QStringList bands;
+    for (auto it = m_bandButtons.begin(); it != m_bandButtons.end(); ++it)
+        if (it.value()->isChecked() && m_sweepsByBand.contains(it.key()))
+            bands << it.key();
+    std::sort(bands.begin(), bands.end(),
+              [](const QString& a, const QString& b) {
+                  return bandRank(a) < bandRank(b);
+              });
+    if (bands.isEmpty()) {
+        QMessageBox::information(this, "No band selected",
+            "Tick at least one band button on the SWR scan tab to choose "
+            "which sweep(s) to export.");
+        return;
+    }
+    const bool multi = bands.size() > 1;
+    if (multi) {
+        const auto btn = QMessageBox::question(this, "Export multiple bands",
+            QString("%1 bands are ticked and will all be written to one "
+                    "file:\n\n    %2\n\nExport all of them? "
+                    "(Untick bands on the SWR tab to narrow it down.)")
+                .arg(bands.size()).arg(bands.join(", ")),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+        if (btn != QMessageBox::Yes) return;
+    }
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
-    const QString defaultName = QString("swr-sweep-%1.csv").arg(stamp);
+    const QString defaultName =
+        QString("swr-sweep-%1-%2.csv").arg(bands.join('-')).arg(stamp);
     QSettings settings;   // share the remembered folder with Save log…
     const QString fallbackDir =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -666,27 +883,38 @@ void MainWindow::onSaveSweep()
         QMessageBox::critical(this, "Save failed", f.errorString());
         return;
     }
-    qint64 minF = 0; double minS = 1e9;
-    for (auto it = m_lastSweep.begin(); it != m_lastSweep.end(); ++it)
-        if (it.value() < minS) { minS = it.value(); minF = it.key(); }
-
     QTextStream out(&f);
-    out << "# TCI Monitor SWR sweep\n"
-        << "# captured: " << m_sweepStartStamp << "\n"
-        << "# points: "   << m_lastSweep.size() << "\n"
-        << "# min SWR: "   << QString::number(minS, 'f', 2)
-        << " @ "           << QString::number(minF / 1e6, 'f', 6) << " MHz\n"
-        << "frequency_mhz,swr\n";
-    // QMap iterates sorted by key → rows already in ascending frequency order.
-    for (auto it = m_lastSweep.begin(); it != m_lastSweep.end(); ++it)
-        out << QString::number(it.key() / 1e6, 'f', 6) << ','
-            << QString::number(it.value(), 'f', 2) << '\n';
+    out << "# TCI Monitor SWR sweep\n";
+    int total = 0;
+    for (const QString& band : bands) {
+        const auto& m = m_sweepsByBand.value(band);
+        qint64 minF = 0; double minS = 1e9;
+        for (auto it = m.begin(); it != m.end(); ++it)
+            if (it.value() < minS) { minS = it.value(); minF = it.key(); }
+        out << "# " << band << ": " << m.size() << " pts, captured "
+            << m_sweepStampByBand.value(band) << ", min SWR "
+            << QString::number(minS, 'f', 2) << " @ "
+            << QString::number(minF / 1e6, 'f', 6) << " MHz\n";
+        total += m.size();
+    }
+    out << (multi ? "band,frequency_mhz,swr\n" : "frequency_mhz,swr\n");
+    for (const QString& band : bands) {
+        const auto& m = m_sweepsByBand.value(band);
+        // QMap iterates sorted by key → ascending frequency per band.
+        for (auto it = m.begin(); it != m.end(); ++it) {
+            if (multi) out << band << ',';
+            out << QString::number(it.key() / 1e6, 'f', 6) << ','
+                << QString::number(it.value(), 'f', 2) << '\n';
+        }
+    }
     f.close();
 
     settings.setValue("log/lastSaveDir", QFileInfo(path).absolutePath());
     statusBar()->showMessage(
-        QString("Saved %1-point SWR sweep to %2")
-            .arg(m_lastSweep.size()).arg(QFileInfo(path).fileName()), 4000);
+        QString("Saved %1 (%2 band%3, %4 pts)")
+            .arg(QFileInfo(path).fileName())
+            .arg(bands.size()).arg(bands.size() == 1 ? "" : "s").arg(total),
+        4000);
 }
 
 void MainWindow::onFilterChanged(const QString&)

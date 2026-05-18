@@ -23,10 +23,13 @@ class QPushButton;
 class QLabel;
 class QTableWidget;
 class QCheckBox;
+class QTabWidget;
+class QHBoxLayout;
 
 namespace TciMon {
 
 class TciClient;
+class SwrPlot;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -63,6 +66,12 @@ private:
     void handleTrx(const QStringList& args);        // sweep start/stop
     void handleTxSensors(const QStringList& args);  // SWR samples
     void refreshSweepUi();                          // live readout + save btn
+    void finalizeSweep();          // bucket completed sweep into its band
+    void rebuildBandButtons();     // sync SWR-tab band button row
+    void rebuildPlot();            // push checked bands' curves to the plot
+    void persistSweeps();          // save per-band sweeps to QSettings
+    void restoreSweeps();          // load per-band sweeps at startup
+    static QString bandForHz(qint64 hz);
     void refreshStatus();
     void refreshSuppressionUi();   // update label + clear-button, persist set
     void restoreSuppressions();    // load persisted suppressions at startup
@@ -92,8 +101,17 @@ private:
     bool                m_sweepActive{false};  // between trx true→false
     QString             m_sweepStartStamp;     // wall-clock at sweep start
     QMap<qint64,double> m_sweepSwr;            // freqHz → min SWR (in-progress)
-    QMap<qint64,double> m_lastSweep;           // last completed sweep (export)
+    QMap<qint64,double> m_lastSweep;           // last completed sweep
+    QString             m_lastSweepBand;       // band of last completed sweep
     QPushButton*        m_saveSweepBtn{};
+
+    // Per-band sweep store (persisted) + SWR tab UI
+    QMap<QString, QMap<qint64,double>> m_sweepsByBand;
+    QMap<QString, QString>             m_sweepStampByBand;
+    QTabWidget*                        m_leftTabs{};
+    SwrPlot*                           m_swrPlot{};
+    QHBoxLayout*                       m_bandBtnLayout{};
+    QMap<QString, QPushButton*>        m_bandButtons;
 
     // Raw log — table so we can right-click rows and suppress message
     // types that flood the stream (rx_smeter etc).
