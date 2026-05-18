@@ -59,6 +59,8 @@ private:
     void handleSpotDelete(const QStringList& args);
     void handleSpotClear();
     void refreshStatus();
+    void refreshSuppressionUi();   // update label + clear-button, persist set
+    void restoreSuppressions();    // load persisted suppressions at startup
 
     TciClient* m_tci{nullptr};
 

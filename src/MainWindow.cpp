@@ -32,6 +32,8 @@
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
 #include <QFile>
+#include <QFileInfo>
+#include <QSettings>
 #include <QTextStream>
 
 namespace TciMon {
@@ -94,6 +96,7 @@ MainWindow::MainWindow(QWidget* parent)
     resize(1200, 720);
 
     buildUI();
+    restoreSuppressions();   // re-apply last run's suppression filters
 
     connect(m_tci, &TciClient::connectionChanged, this, &MainWindow::onConnectionChanged);
     connect(m_tci, &TciClient::rawMessageReceived, this, &MainWindow::onRawMessage);
@@ -520,7 +523,13 @@ void MainWindow::onSaveLog()
 {
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
     const QString defaultName = QString("tci-monitor-%1.log").arg(stamp);
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    // Open the dialog in the directory used for the last successful save,
+    // falling back to Documents the first time (key shared via the app's
+    // G0JKN / "TCI Monitor" QSettings, same as DiscoveryDialog).
+    QSettings settings;
+    const QString fallbackDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString dir = settings.value("log/lastSaveDir", fallbackDir).toString();
     const QString path = QFileDialog::getSaveFileName(this, "Save log",
                             dir + "/" + defaultName,
                             "Log files (*.log *.txt);;All files (*)");
@@ -537,6 +546,9 @@ void MainWindow::onSaveLog()
             << m_logTable->item(r, 2)->text() << "\n";
     }
     f.close();
+
+    // Remember where we saved so the next Save log… opens here, not Documents.
+    settings.setValue("log/lastSaveDir", QFileInfo(path).absolutePath());
 }
 
 void MainWindow::onFilterChanged(const QString&)
@@ -611,10 +623,7 @@ void MainWindow::onLogContextMenu(const QPoint& pos)
             auto* it = m_logTable->item(r, 1);
             if (it && it->text() == cmdHere) m_logTable->removeRow(r);
         }
-        m_suppressLabel->setText(QString("%1 suppression%2")
-                                     .arg(m_suppressed.size())
-                                     .arg(m_suppressed.size() == 1 ? "" : "s"));
-        m_clearSuppressBtn->setEnabled(true);
+        refreshSuppressionUi();
     } else if (describeAct && chosen == describeAct) {
         const TciCommand* cmd = findTciCommand(cmdHere);
         CommandDescriptionDialog dlg(cmd, cmdHere, this);
@@ -703,17 +712,38 @@ void MainWindow::onShowSuppressions()
 
     dlg.exec();
 
-    m_suppressLabel->setText(QString("%1 suppression%2")
-                                 .arg(m_suppressed.size())
-                                 .arg(m_suppressed.size() == 1 ? "" : "s"));
-    m_clearSuppressBtn->setEnabled(!m_suppressed.isEmpty());
+    refreshSuppressionUi();
 }
 
 void MainWindow::onClearSuppressions()
 {
     m_suppressed.clear();
-    m_suppressLabel->setText("0 suppressions");
-    m_clearSuppressBtn->setEnabled(false);
+    refreshSuppressionUi();
+}
+
+// ── Suppression persistence ────────────────────────────────────────────
+
+void MainWindow::refreshSuppressionUi()
+{
+    const int n = m_suppressed.size();
+    m_suppressLabel->setText(n == 0
+        ? QStringLiteral("0 suppressions")
+        : QString("%1 suppression%2").arg(n).arg(n == 1 ? "" : "s"));
+    m_clearSuppressBtn->setEnabled(n > 0);
+
+    // Persist so the same filters re-apply on next launch (shared G0JKN /
+    // "TCI Monitor" QSettings).
+    QSettings settings;
+    settings.setValue("log/suppressed",
+        QStringList(m_suppressed.begin(), m_suppressed.end()));
+}
+
+void MainWindow::restoreSuppressions()
+{
+    QSettings settings;
+    const QStringList saved = settings.value("log/suppressed").toStringList();
+    for (const QString& cmd : saved) m_suppressed.insert(cmd);
+    refreshSuppressionUi();
 }
 
 void MainWindow::onShowCommandsReference()
