@@ -80,6 +80,13 @@ void TciClient::onConnected()
     // Send `start;` to request streaming events.  Servers ignore unknown
     // commands so this is safe across TCI dialects.
     send("start;");
+    // Opt in to sensor telemetry. tx_sensors carries SWR (and fwd/peak
+    // watts, mic dBm) while transmitting — needed to observe an antenna
+    // SWR sweep over TCI. rx_sensors adds the per-channel S-meter dBm.
+    // Both are opt-in on AetherSDR (default off); unknown elsewhere = safely
+    // ignored, same as `start;`.
+    send("tx_sensors_enable:true;");
+    send("rx_sensors_enable:true;");
 }
 
 void TciClient::onDisconnected()

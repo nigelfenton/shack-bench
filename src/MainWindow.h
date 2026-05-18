@@ -13,6 +13,7 @@
 // emits raw lines and we slice them into structured forms here.
 
 #include <QMainWindow>
+#include <QMap>
 #include <QSet>
 #include <QString>
 
@@ -40,6 +41,7 @@ private slots:
     void onRawMessage(const QString& line);
     void onErrorText(const QString& text);
     void onSaveLog();
+    void onSaveSweep();
     void onClearLog();
     void onFilterChanged(const QString& text);
     void onPauseToggled(bool checked);
@@ -58,6 +60,9 @@ private:
     void handleSpot(const QStringList& args);
     void handleSpotDelete(const QStringList& args);
     void handleSpotClear();
+    void handleTrx(const QStringList& args);        // sweep start/stop
+    void handleTxSensors(const QStringList& args);  // SWR samples
+    void refreshSweepUi();                          // live readout + save btn
     void refreshStatus();
     void refreshSuppressionUi();   // update label + clear-button, persist set
     void restoreSuppressions();    // load persisted suppressions at startup
@@ -76,7 +81,19 @@ private:
     // Parsed display
     QLabel*       m_curVfo{};
     QLabel*       m_curMode{};
+    QLabel*       m_sweepLabel{};   // live SWR-sweep readout
     QTableWidget* m_spotTable{};
+
+    // SWR sweep capture. AE's antenna sweep keys TX (trx:0,true) and steps
+    // vfo:0,0,<hz>; while emitting tx_sensors:0,mic,fwd,peak,swr; — we pair
+    // the most-recent vfo freq with each tx_sensors SWR until trx:0,false.
+    qint64              m_sweepCurFreqHz{0};   // latest vfo: freq (RX0/VFO0)
+    double              m_sweepCurSwr{0.0};    // latest SWR seen in a sweep
+    bool                m_sweepActive{false};  // between trx true→false
+    QString             m_sweepStartStamp;     // wall-clock at sweep start
+    QMap<qint64,double> m_sweepSwr;            // freqHz → min SWR (in-progress)
+    QMap<qint64,double> m_lastSweep;           // last completed sweep (export)
+    QPushButton*        m_saveSweepBtn{};
 
     // Raw log — table so we can right-click rows and suppress message
     // types that flood the stream (rx_smeter etc).

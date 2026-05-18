@@ -199,8 +199,17 @@ void MainWindow::buildUI()
         m_curMode->setMinimumWidth(80);
         modeBlock->addWidget(lmd); modeBlock->addWidget(m_curMode);
 
+        auto* sweepBlock = new QVBoxLayout; sweepBlock->setSpacing(0);
+        auto* lsw = new QLabel("SWR SWEEP"); lsw->setStyleSheet(kCaptionStyle);
+        m_sweepLabel = new QLabel("idle");
+        m_sweepLabel->setStyleSheet(kCaptionStyle);
+        m_sweepLabel->setMinimumWidth(360);
+        sweepBlock->addWidget(lsw); sweepBlock->addWidget(m_sweepLabel);
+
         hdr->addLayout(vfoBlock);
         hdr->addLayout(modeBlock);
+        hdr->addSpacing(16);
+        hdr->addLayout(sweepBlock);
         hdr->addStretch();
         lv->addLayout(hdr);
 
@@ -303,11 +312,15 @@ void MainWindow::buildUI()
     {
         auto* row = new QHBoxLayout;
         m_saveBtn  = new QPushButton("Save log…");
+        m_saveSweepBtn = new QPushButton("Save SWR sweep…");
+        m_saveSweepBtn->setEnabled(false);
         m_clearBtn = new QPushButton("Clear log");
         connect(m_saveBtn,  &QPushButton::clicked, this, &MainWindow::onSaveLog);
+        connect(m_saveSweepBtn, &QPushButton::clicked, this, &MainWindow::onSaveSweep);
         connect(m_clearBtn, &QPushButton::clicked, this, &MainWindow::onClearLog);
         row->addStretch();
         row->addWidget(m_saveBtn);
+        row->addWidget(m_saveSweepBtn);
         row->addWidget(m_clearBtn);
         main->addLayout(row);
     }
@@ -392,6 +405,8 @@ void MainWindow::parseLine(const QString& line)
     else if (cmd == "spot")         handleSpot(args);
     else if (cmd == "spot_delete")  handleSpotDelete(args);
     else if (cmd == "spot_clear")   handleSpotClear();
+    else if (cmd == "trx")          handleTrx(args);
+    else if (cmd == "tx_sensors")   handleTxSensors(args);
 }
 
 void MainWindow::handleVfo(const QStringList& args)
@@ -400,6 +415,82 @@ void MainWindow::handleVfo(const QStringList& args)
     if (args.size() < 3) return;
     if (args[0].trimmed() != "0" || args[1].trimmed() != "0") return;
     m_curVfo->setText(hzToMhz(args[2]) + " MHz");
+    // Track the live freq so a sweep's tx_sensors SWR can be paired with it.
+    bool ok = false;
+    const qint64 hz = args[2].trimmed().toLongLong(&ok);
+    if (ok && hz > 0) m_sweepCurFreqHz = hz;
+}
+
+// ── SWR sweep capture ──────────────────────────────────────────────────
+//
+// AE's antenna SWR sweep keys TX (trx:0,true), steps vfo:0,0,<hz>; across
+// the band, and emits tx_sensors:0,mic,fwd,peak,swr; while transmitting.
+// We pair the latest vfo freq with each tx_sensors SWR, keeping the
+// minimum SWR seen per frequency, until trx:0,false ends the sweep.
+
+void MainWindow::handleTrx(const QStringList& args)
+{
+    if (args.size() < 2 || args[0].trimmed() != "0") return;
+    const QString state = args[1].trimmed().toLower();
+    if (state == "true") {
+        m_sweepActive = true;
+        m_sweepSwr.clear();
+        m_sweepCurSwr = 0.0;
+        m_sweepStartStamp =
+            QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+    } else if (state == "false") {
+        if (m_sweepActive && !m_sweepSwr.isEmpty()) {
+            m_lastSweep = m_sweepSwr;          // freeze for export
+            m_saveSweepBtn->setEnabled(true);
+        }
+        m_sweepActive = false;
+    }
+    refreshSweepUi();
+}
+
+void MainWindow::handleTxSensors(const QStringList& args)
+{
+    // tx_sensors:trx,mic_dbm,fwd_watts,peak_watts,swr
+    if (args.size() < 5 || args[0].trimmed() != "0") return;
+    bool ok = false;
+    const double swr = args[4].trimmed().toDouble(&ok);
+    if (!ok) return;
+    m_sweepCurSwr = swr;
+    if (m_sweepActive && m_sweepCurFreqHz > 0) {
+        auto it = m_sweepSwr.find(m_sweepCurFreqHz);
+        if (it == m_sweepSwr.end() || swr < it.value())
+            m_sweepSwr[m_sweepCurFreqHz] = swr;   // keep the best (min) SWR
+        refreshSweepUi();
+    }
+}
+
+void MainWindow::refreshSweepUi()
+{
+    const QMap<qint64,double>& src =
+        m_sweepActive ? m_sweepSwr : m_lastSweep;
+
+    if (src.isEmpty()) {
+        m_sweepLabel->setText(m_sweepActive ? "sweeping…" : "idle");
+        return;
+    }
+    // Find min-SWR point for the summary.
+    qint64 minF = 0; double minS = 1e9;
+    for (auto it = src.begin(); it != src.end(); ++it)
+        if (it.value() < minS) { minS = it.value(); minF = it.key(); }
+
+    const QString minMhz = QString::number(minF / 1e6, 'f', 3);
+    if (m_sweepActive) {
+        m_sweepLabel->setText(
+            QString("● %1 MHz  SWR %2  |  min %3 @ %4 MHz  |  %5 pts")
+                .arg(m_sweepCurFreqHz / 1e6, 0, 'f', 3)
+                .arg(m_sweepCurSwr, 0, 'f', 2)
+                .arg(minS, 0, 'f', 2).arg(minMhz)
+                .arg(src.size()));
+    } else {
+        m_sweepLabel->setText(
+            QString("done — %1 pts, min %2 @ %3 MHz  (Save SWR sweep…)")
+                .arg(src.size()).arg(minS, 0, 'f', 2).arg(minMhz));
+    }
 }
 
 void MainWindow::handleMode(const QStringList& args)
@@ -549,6 +640,53 @@ void MainWindow::onSaveLog()
 
     // Remember where we saved so the next Save log… opens here, not Documents.
     settings.setValue("log/lastSaveDir", QFileInfo(path).absolutePath());
+}
+
+void MainWindow::onSaveSweep()
+{
+    if (m_lastSweep.isEmpty()) {
+        QMessageBox::information(this, "No sweep",
+            "No completed SWR sweep captured yet. Run an antenna SWR sweep "
+            "in AetherSDR with TCI Monitor connected, then try again.");
+        return;
+    }
+    const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+    const QString defaultName = QString("swr-sweep-%1.csv").arg(stamp);
+    QSettings settings;   // share the remembered folder with Save log…
+    const QString fallbackDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString dir = settings.value("log/lastSaveDir", fallbackDir).toString();
+    const QString path = QFileDialog::getSaveFileName(this, "Save SWR sweep",
+                            dir + "/" + defaultName,
+                            "CSV files (*.csv);;All files (*)");
+    if (path.isEmpty()) return;
+
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        QMessageBox::critical(this, "Save failed", f.errorString());
+        return;
+    }
+    qint64 minF = 0; double minS = 1e9;
+    for (auto it = m_lastSweep.begin(); it != m_lastSweep.end(); ++it)
+        if (it.value() < minS) { minS = it.value(); minF = it.key(); }
+
+    QTextStream out(&f);
+    out << "# TCI Monitor SWR sweep\n"
+        << "# captured: " << m_sweepStartStamp << "\n"
+        << "# points: "   << m_lastSweep.size() << "\n"
+        << "# min SWR: "   << QString::number(minS, 'f', 2)
+        << " @ "           << QString::number(minF / 1e6, 'f', 6) << " MHz\n"
+        << "frequency_mhz,swr\n";
+    // QMap iterates sorted by key → rows already in ascending frequency order.
+    for (auto it = m_lastSweep.begin(); it != m_lastSweep.end(); ++it)
+        out << QString::number(it.key() / 1e6, 'f', 6) << ','
+            << QString::number(it.value(), 'f', 2) << '\n';
+    f.close();
+
+    settings.setValue("log/lastSaveDir", QFileInfo(path).absolutePath());
+    statusBar()->showMessage(
+        QString("Saved %1-point SWR sweep to %2")
+            .arg(m_lastSweep.size()).arg(QFileInfo(path).fileName()), 4000);
 }
 
 void MainWindow::onFilterChanged(const QString&)
