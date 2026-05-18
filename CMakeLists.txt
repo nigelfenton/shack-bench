@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(TciMonitor
-    VERSION 0.1.0
+    VERSION 0.3.0
     DESCRIPTION "Diagnostic monitor for the TCI WebSocket protocol"
     LANGUAGES CXX)
 
@@ -30,6 +30,14 @@ set(TCIMON_SOURCES
     src/MainWindow.h
     src/TciClient.cpp
     src/TciClient.h
+    src/InspectorPanel.cpp
+    src/InspectorPanel.h
+    src/ConsolePanel.cpp
+    src/ConsolePanel.h
+    src/ComparePanel.cpp
+    src/ComparePanel.h
+    src/ReplayPanel.cpp
+    src/ReplayPanel.h
     src/SwrPlot.cpp
     src/SwrPlot.h
     src/TciCommands.cpp

@@ -30,6 +30,10 @@ namespace TciMon {
 
 class TciClient;
 class SwrPlot;
+class InspectorPanel;
+class ConsolePanel;
+class ComparePanel;
+class ReplayPanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -77,6 +81,13 @@ private:
     void restoreSuppressions();    // load persisted suppressions at startup
 
     TciClient* m_tci{nullptr};
+
+    // Toolkit tabs (Monitor is tab 0; the rest are the v0.3 tools)
+    QTabWidget*     m_topTabs{};
+    InspectorPanel* m_inspector{};
+    ConsolePanel*   m_console{};
+    ComparePanel*   m_compare{};
+    ReplayPanel*    m_replay{};
 
     // Connect bar
     QLineEdit*   m_hostEdit{};

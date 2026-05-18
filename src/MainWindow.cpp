@@ -2,7 +2,11 @@
 
 #include "CommandDescriptionDialog.h"
 #include "CommandsReferenceDialog.h"
+#include "ComparePanel.h"
+#include "ConsolePanel.h"
 #include "DiscoveryDialog.h"
+#include "InspectorPanel.h"
+#include "ReplayPanel.h"
 #include "SwrPlot.h"
 #include "TciClient.h"
 #include "TciCommands.h"
@@ -341,9 +345,18 @@ void MainWindow::buildUI()
 
     split->setStretchFactor(0, 2);
     split->setStretchFactor(1, 3);
-    main->addWidget(split, 1);
 
-    // ── Bottom action row ──────────────────────────────────────────────
+    // The live monitor (spots/SWR + raw log + its action row) becomes the
+    // first tab.  The v0.3 tools are sibling tabs that share the connect
+    // bar above — Inspect/Console/Replay are fed off the same m_tci stream;
+    // Compare runs its own independent observer connections.
+    auto* monitorTab = new QWidget;
+    auto* mlay = new QVBoxLayout(monitorTab);
+    mlay->setContentsMargins(0, 0, 0, 0);
+    mlay->setSpacing(6);
+    mlay->addWidget(split, 1);
+
+    // ── Bottom action row (inside the Monitor tab) ─────────────────────
     {
         auto* row = new QHBoxLayout;
         m_saveBtn  = new QPushButton("Save log…");
@@ -357,8 +370,26 @@ void MainWindow::buildUI()
         row->addWidget(m_saveBtn);
         row->addWidget(m_saveSweepBtn);
         row->addWidget(m_clearBtn);
-        main->addLayout(row);
+        mlay->addLayout(row);
     }
+
+    // ── Top-level toolkit tabs ─────────────────────────────────────────
+    m_topTabs = new QTabWidget;
+    m_topTabs->addTab(monitorTab, "Monitor");
+
+    m_inspector = new InspectorPanel;
+    m_topTabs->addTab(m_inspector, "Inspect");
+
+    m_console = new ConsolePanel(m_tci);
+    m_topTabs->addTab(m_console, "Console");
+
+    m_compare = new ComparePanel;
+    m_topTabs->addTab(m_compare, "Compare");
+
+    m_replay = new ReplayPanel;
+    m_topTabs->addTab(m_replay, "Replay");
+
+    main->addWidget(m_topTabs, 1);
 
     // ── Status bar counters ────────────────────────────────────────────
     m_sbMsgCount  = new QLabel("0 msgs");
@@ -424,6 +455,13 @@ void MainWindow::onRawMessage(const QString& line)
 
     appendLog(line, color);
     parseLine(line);
+
+    // Fan the same stream out to the toolkit tabs.  Compare has its own
+    // independent observer connections, so it is not fed from here.
+    if (m_inspector) m_inspector->ingest(line);
+    if (m_console)   m_console->noteIncoming(line);
+    if (m_replay)    m_replay->noteIncoming(line);
+
     refreshStatus();
 }
 
