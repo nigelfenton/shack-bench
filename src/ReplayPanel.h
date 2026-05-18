@@ -67,6 +67,7 @@ private:
     QSpinBox*        m_portSpin{};
     QDoubleSpinBox*  m_speedSpin{};
     QCheckBox*       m_loopCheck{};
+    QCheckBox*       m_lanCheck{};
     QPushButton*     m_startBtn{};
     QPushButton*     m_stopBtn{};
     QLabel*          m_srvStatus{};

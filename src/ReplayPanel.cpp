@@ -6,7 +6,9 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
+#include <QHostAddress>
 #include <QHBoxLayout>
+#include <QMessageBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -82,7 +84,17 @@ ReplayPanel::ReplayPanel(QWidget* parent)
         auto* pl = new QLabel("PORT"); pl->setStyleSheet(kCaptionStyle);
         m_portSpin = new QSpinBox;
         m_portSpin->setRange(1, 65535);
-        m_portSpin->setValue(40001);
+        // Deliberately NOT 40001 (AetherSDR) or 50001 (ExpertSDR2/SunSDR):
+        // binding a live TCI port out from under the real server makes the
+        // radio unreachable.  Use an off-band default.
+        m_portSpin->setValue(40010);
+
+        m_lanCheck = new QCheckBox("Expose on LAN");
+        m_lanCheck->setToolTip(
+            "Unchecked: replay server is reachable only from this machine "
+            "(127.0.0.1) — the safe default.\n"
+            "Checked: bind all interfaces so another PC (e.g. WSJT-X on a "
+            "laptop) can connect.");
 
         auto* sl = new QLabel("SPEED ×"); sl->setStyleSheet(kCaptionStyle);
         m_speedSpin = new QDoubleSpinBox;
@@ -102,6 +114,8 @@ ReplayPanel::ReplayPanel(QWidget* parent)
                 this, &ReplayPanel::onStopServer);
 
         row->addWidget(pl); row->addWidget(m_portSpin);
+        row->addSpacing(8);
+        row->addWidget(m_lanCheck);
         row->addSpacing(8);
         row->addWidget(sl); row->addWidget(m_speedSpin);
         row->addSpacing(8);
@@ -264,10 +278,38 @@ void ReplayPanel::onStartServer()
         return;
     }
 
+    const quint16 port = static_cast<quint16>(m_portSpin->value());
+
+    // Hard guard: refuse to squat a live TCI server port.  Binding 40001
+    // (AetherSDR) or 50001 (ExpertSDR2/SunSDR) here would intercept the
+    // real radio's clients and make it look like the radio died.
+    if (port == 40001 || port == 50001) {
+        const auto r = QMessageBox::warning(this,
+            "Replaying on a live TCI port",
+            QString("Port %1 is a standard live TCI server port "
+                    "(AetherSDR uses 40001, ExpertSDR2/SunSDR 50001).\n\n"
+                    "Running the replay server here can take the port from "
+                    "the real radio's TCI server and make it unreachable.\n\n"
+                    "Pick a different port instead (default 40010), or "
+                    "continue only if no real TCI server is running.")
+                .arg(port),
+            QMessageBox::Cancel | QMessageBox::Ignore, QMessageBox::Cancel);
+        if (r != QMessageBox::Ignore) {
+            status(QString("cancelled — port %1 collides with a live TCI "
+                           "server").arg(port), "#ffaa00");
+            return;
+        }
+    }
+
     m_server = new QWebSocketServer(QStringLiteral("TCI Monitor Replay"),
                                     QWebSocketServer::NonSecureMode, this);
-    const quint16 port = static_cast<quint16>(m_portSpin->value());
-    if (!m_server->listen(QHostAddress::Any, port)) {
+    // Loopback-only unless the user explicitly opts into LAN exposure —
+    // a replay server should not be reachable across the network by
+    // default.
+    const QHostAddress bindAddr = m_lanCheck->isChecked()
+        ? QHostAddress(QHostAddress::Any)
+        : QHostAddress(QHostAddress::LocalHost);
+    if (!m_server->listen(bindAddr, port)) {
         status(QString("listen on :%1 failed: %2")
                    .arg(port).arg(m_server->errorString()), "#ff5050");
         delete m_server;
@@ -282,11 +324,14 @@ void ReplayPanel::onStartServer()
     m_stopBtn->setEnabled(true);
     m_pathEdit->setEnabled(false);
     m_portSpin->setEnabled(false);
+    const QString scope = m_lanCheck->isChecked()
+        ? QStringLiteral("0.0.0.0 (LAN)") : QStringLiteral("127.0.0.1");
     m_srvStatus->setText(
-        QString("listening ws://localhost:%1  •  %2 lines loaded  •  "
-                "waiting for a client").arg(port).arg(m_script.size()));
-    status(QString("server up on :%1 — %2 lines, connect a client now")
-               .arg(port).arg(m_script.size()), "#4cff7c");
+        QString("listening ws://%1:%2  •  %3 lines loaded  •  "
+                "waiting for a client").arg(scope).arg(port)
+                .arg(m_script.size()));
+    status(QString("server up on %1:%2 — %3 lines, connect a client now")
+               .arg(scope).arg(port).arg(m_script.size()), "#4cff7c");
 }
 
 void ReplayPanel::onStopServer()
