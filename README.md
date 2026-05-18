@@ -102,10 +102,16 @@ as a **local TCI server** so another client (WSJT-X, a logger, a second
 TCI Monitor) can connect to it offline — no radio involved.
 
 - **Record** writes a `.tcicap` file (format below).
-- **Replay** stands up a `QWebSocketServer` on the chosen port and feeds
-  the file with its original inter-message timing.  Speed factor scales
-  the timing; Loop restarts at the end.  It also accepts a plain saved
-  raw log (timestamps are stripped and a fixed gap is used).
+- **Replay** stands up a `QWebSocketServer` and feeds the file with its
+  original inter-message timing.  Speed factor scales the timing; Loop
+  restarts at the end.  It also accepts a plain saved raw log
+  (timestamps are stripped and a fixed gap is used).
+
+  The server defaults to **port 40010** and binds **127.0.0.1 only** —
+  deliberately *not* 40001/50001, and not the LAN, so it can never take
+  a live TCI port from the real radio.  Tick **Expose on LAN** to bind
+  all interfaces (for WSJT-X on another machine); choosing 40001/50001
+  requires an explicit confirm.
 
 ## Capture file format
 
