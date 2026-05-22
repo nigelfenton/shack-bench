@@ -131,6 +131,12 @@ private:
     QVector<Row> m_coarseRows;   // coarse pass result (for fine fallback)
     QVector<Row> m_allRows;      // every measured point — CSV + plot
 
+    // Provenance for the saved CSV — wall-clock + AetherSDR greeting.
+    QString m_runStarted;        // ISO datetime when Start was clicked
+    QString m_serverSoftware;    // latest software:<...>
+    QString m_serverProtocol;    // latest protocol:<...>
+    QString m_serverDevice;      // latest device:<...>
+
     // Per-point telemetry accumulator
     QVector<double> m_sFwd, m_sSwr, m_sAlc;
     bool   m_haveAlc{false};

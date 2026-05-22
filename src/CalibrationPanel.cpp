@@ -1,5 +1,6 @@
 #include "CalibrationPanel.h"
 
+#include "BuildInfo.h"
 #include "CalPlot.h"
 #include "TciClient.h"
 
@@ -217,10 +218,42 @@ void CalibrationPanel::buildUI()
                 return;
             }
             QTextStream out(&f);
+            // Self-identifying header: when, what built, what server, what
+            // came out. Catches the "wrong build" / "AE not transmitting"
+            // confusion at a glance months later.
+            double maxFwdEver = 0.0;
+            for (const Row& r : m_allRows)
+                maxFwdEver = std::max(maxFwdEver, r.fwdMax);
+            const bool noCarrier = !m_allRows.isEmpty() && maxFwdEver <= 0.0;
+            auto orUnknown = [](const QString& s) {
+                return s.isEmpty() ? QStringLiteral("(unknown)") : s;
+            };
             out << "# TCI Monitor TX-drive calibration\n";
+            out << "# run started:      " << m_runStarted << "\n";
+            out << "# TCI Monitor:      commit " << TciMon::kBuildGitHash
+                << " on " << TciMon::kBuildGitBranch
+                << " (dirty=" << TciMon::kBuildGitDirty << ")"
+                << ", committed " << TciMon::kBuildGitDate
+                << ", compiled " << TciMon::kBuildDate
+                << " on " << TciMon::kBuildHostOs << "\n";
+            out << "# AetherSDR server: device="   << orUnknown(m_serverDevice)
+                << "  protocol="                 << orUnknown(m_serverProtocol)
+                << "  software="                 << orUnknown(m_serverSoftware)
+                << "\n";
+            if (noCarrier) {
+                out << "# WARNING: forward power = 0 W across the whole sweep.\n"
+                       "#          Radio was keyed but produced no carrier --\n"
+                       "#          TX audio is likely not routed. In AetherSDR\n"
+                       "#          set the slice's TX source to PC / enable\n"
+                       "#          DAX TX. The recommendation below is NOT\n"
+                       "#          meaningful.\n";
+            }
             if (m_recGain >= 0)
                 out << "# recommended tx_gain=" << m_recGain
                     << "  ALC target " << m_alcTargetVal << " dBFS\n";
+            else
+                out << "# recommended tx_gain=(none)  ALC target "
+                    << m_alcTargetVal << " dBFS\n";
             out << "rf_power,tx_gain,n_samples,fwd_avg_w,fwd_max_w,"
                    "swr_avg,alc_avg_dbfs,alc_max_dbfs\n";
             for (const Row& r : m_allRows) {
@@ -381,6 +414,7 @@ void CalibrationPanel::onStartClicked()
     m_coarseRows.clear();
     m_kneeGain = m_recGain = -1;
     m_haveAlc  = false;
+    m_runStarted = QDateTime::currentDateTime().toString(Qt::ISODate);
     m_transcript->clear();
     m_result->setText("—");
 
@@ -578,12 +612,27 @@ void CalibrationPanel::finishPass()
 
 void CalibrationPanel::concludeRun(int recGain)
 {
+    // Sanity check: every point with fwd=0 means the radio was keyed but no
+    // audio reached the modulator (the ALC "knee" is then just the noise
+    // floor and the recommendation would be meaningless). Refuse it.
+    double maxFwdEver = 0.0;
+    for (const Row& r : m_allRows)
+        maxFwdEver = std::max(maxFwdEver, r.fwdMax);
+    const bool noCarrier = !m_allRows.isEmpty() && maxFwdEver <= 0.0;
+    if (noCarrier) recGain = -1;
+
     m_recGain = recGain;
     setRunning(false);
     m_progress->setText("done");
     redrawPlot();
 
-    if (recGain >= 0) {
+    if (noCarrier) {
+        m_result->setText("No carrier produced (fwd = 0 W across the sweep) "
+                          "— check TX audio routing in AetherSDR "
+                          "(slice TX source / DAX TX).");
+        log("WARNING — forward power = 0 W across the whole sweep; "
+            "no recommendation made", "#ff5050");
+    } else if (recGain >= 0) {
         // Pull the recommended point's telemetry for the summary.
         QString detail;
         for (const Row& r : m_allRows) {
@@ -672,7 +721,20 @@ void CalibrationPanel::noteIncoming(const QString& line)
 {
     const int colon = line.indexOf(':');
     if (colon < 0) return;
-    if (line.left(colon).trimmed().toLower() != "tx_sensors") return;
+    const QString cmd = line.left(colon).trimmed().toLower();
+
+    // Capture the server-identification greeting (sent once at connect).
+    // We remember the latest value of each so the saved CSV can say exactly
+    // which AetherSDR build produced the data.
+    if (cmd == "software" || cmd == "protocol" || cmd == "device") {
+        const QString val = line.mid(colon + 1).trimmed();
+        if      (cmd == "software") m_serverSoftware = val;
+        else if (cmd == "protocol") m_serverProtocol = val;
+        else if (cmd == "device")   m_serverDevice   = val;
+        return;
+    }
+
+    if (cmd != "tx_sensors") return;
 
     // tx_sensors:trx,mic_dbm,fwd_watts,peak_watts,swr[,alc_dbfs]
     const QStringList a = line.mid(colon + 1).split(',');

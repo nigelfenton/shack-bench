@@ -24,6 +24,60 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS
     WebSockets
 )
 
+# ── Git build-info ────────────────────────────────────────────────────────
+# Capture commit hash / date / branch / dirty flag at configure time and
+# bake them into BuildInfo.cpp so every saved calibration CSV (and any
+# future "About" surface) can identify exactly which binary produced it.
+# Re-run configure to refresh the hash; the compile date in BuildInfo
+# catches cases where you rebuild without reconfiguring.
+find_package(Git QUIET)
+set(TCIMON_GIT_HASH "unknown")
+set(TCIMON_GIT_DATE "unknown")
+set(TCIMON_GIT_BRANCH "unknown")
+set(TCIMON_GIT_DIRTY "unknown")
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD
+        OUTPUT_VARIABLE _tcimon_git_hash
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_tcimon_git_hash)
+        set(TCIMON_GIT_HASH "${_tcimon_git_hash}")
+    endif()
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} log -1 --format=%cI
+        OUTPUT_VARIABLE _tcimon_git_date
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_tcimon_git_date)
+        set(TCIMON_GIT_DATE "${_tcimon_git_date}")
+    endif()
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} rev-parse --abbrev-ref HEAD
+        OUTPUT_VARIABLE _tcimon_git_branch
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_tcimon_git_branch)
+        set(TCIMON_GIT_BRANCH "${_tcimon_git_branch}")
+    endif()
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} status --porcelain
+        OUTPUT_VARIABLE _tcimon_git_status
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_tcimon_git_status)
+        set(TCIMON_GIT_DIRTY "yes")
+    else()
+        set(TCIMON_GIT_DIRTY "no")
+    endif()
+endif()
+configure_file(
+    ${CMAKE_SOURCE_DIR}/src/BuildInfo.cpp.in
+    ${CMAKE_BINARY_DIR}/generated/BuildInfo.cpp
+    @ONLY)
+message(STATUS "TCI Monitor build: ${TCIMON_GIT_HASH} (${TCIMON_GIT_BRANCH})"
+        " dirty=${TCIMON_GIT_DIRTY} committed=${TCIMON_GIT_DATE}")
+
 set(TCIMON_SOURCES
     src/main.cpp
     src/MainWindow.cpp
@@ -44,6 +98,8 @@ set(TCIMON_SOURCES
     src/CalPlot.h
     src/CalibrationPanel.cpp
     src/CalibrationPanel.h
+    src/BuildInfo.h
+    ${CMAKE_BINARY_DIR}/generated/BuildInfo.cpp
     src/TciCommands.cpp
     src/TciCommands.h
     src/CommandDescriptionDialog.cpp
