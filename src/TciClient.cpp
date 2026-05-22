@@ -1,6 +1,7 @@
 #include "TciClient.h"
 
 #include <QWebSocket>
+#include <QAbstractSocket>
 #include <QTimer>
 #include <QStringList>
 
@@ -25,7 +26,14 @@ TciClient::TciClient(QObject* parent)
     connect(m_socket, &QWebSocket::connected,           this, &TciClient::onConnected);
     connect(m_socket, &QWebSocket::disconnected,        this, &TciClient::onDisconnected);
     connect(m_socket, &QWebSocket::textMessageReceived, this, &TciClient::onTextMessage);
+    // QWebSocket::errorOccurred was added in Qt 6.5; on 6.2–6.4 the signal is
+    // the (overloaded) error(QAbstractSocket::SocketError).
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     connect(m_socket, &QWebSocket::errorOccurred,       this, &TciClient::onErrorOccurred);
+#else
+    connect(m_socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
+            this, &TciClient::onErrorOccurred);
+#endif
 
     connect(m_reconnectTimer, &QTimer::timeout, this, &TciClient::onReconnectTimeout);
 }
