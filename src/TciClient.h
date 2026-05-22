@@ -11,6 +11,7 @@
 // Auto-reconnect with exponential backoff (1, 2, 5, 10, 30 s) until the
 // caller explicitly disconnects.
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -30,6 +31,7 @@ public:
     void disconnectFromServer();
 
     void send(const QString& cmd);   // surface for ad-hoc command testing
+    void sendBinary(const QByteArray& frame);   // TCI TX-audio frames
 
     bool    connected() const { return m_connected; }
     QUrl    currentUrl() const { return m_url; }

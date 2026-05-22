@@ -40,6 +40,10 @@ set(TCIMON_SOURCES
     src/ReplayPanel.h
     src/SwrPlot.cpp
     src/SwrPlot.h
+    src/CalPlot.cpp
+    src/CalPlot.h
+    src/CalibrationPanel.cpp
+    src/CalibrationPanel.h
     src/TciCommands.cpp
     src/TciCommands.h
     src/CommandDescriptionDialog.cpp

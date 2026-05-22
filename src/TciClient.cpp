@@ -73,6 +73,13 @@ void TciClient::send(const QString& cmd)
     }
 }
 
+void TciClient::sendBinary(const QByteArray& frame)
+{
+    if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+        m_socket->sendBinaryMessage(frame);
+    }
+}
+
 void TciClient::onConnected()
 {
     m_reconnectAttempts = 0;

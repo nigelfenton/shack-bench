@@ -34,6 +34,7 @@ class InspectorPanel;
 class ConsolePanel;
 class ComparePanel;
 class ReplayPanel;
+class CalibrationPanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -84,10 +85,11 @@ private:
 
     // Toolkit tabs (Monitor is tab 0; the rest are the v0.3 tools)
     QTabWidget*     m_topTabs{};
-    InspectorPanel* m_inspector{};
-    ConsolePanel*   m_console{};
-    ComparePanel*   m_compare{};
-    ReplayPanel*    m_replay{};
+    InspectorPanel*   m_inspector{};
+    ConsolePanel*     m_console{};
+    ComparePanel*     m_compare{};
+    ReplayPanel*      m_replay{};
+    CalibrationPanel* m_cal{};
 
     // Connect bar
     QLineEdit*   m_hostEdit{};
