@@ -441,10 +441,10 @@ void CalibrationPanel::onStopClicked()
     } else {
         // Emergency unkey even outside a run.
         if (m_tci) {
-            m_tci->send("trx:0,false;");
+            m_tci->send("trx:0,false,tci;");
             m_tci->send("tune:0,false;");
         }
-        log("manual unkey — sent trx:0,false; tune:0,false;", "#ff5050");
+        log("manual unkey — sent trx:0,false,tci; tune:0,false;", "#ff5050");
     }
 }
 
@@ -510,7 +510,14 @@ void CalibrationPanel::beginKeydown()
         m_step->start(std::min(dwellMs, 400));
         return;
     }
-    if (m_tci) m_tci->send("trx:0,true;");
+    // The ",tci" source argument is required: it forces AetherSDR's
+    // TciServer to take the DAX path (transmit set dax=1) and route the
+    // dax_tx stream to the modulator. Without it, AE only picks the DAX
+    // path when the slice is already in a digital mode (DIGU/DIGL/etc.);
+    // for voice modes (USB/LSB/AM/FM/CW) it stays on the mic path
+    // (transmit set dax=0) and silently discards every TCI audio packet.
+    // — AetherSDR src/core/TciServer.cpp:627-661 (#2304).
+    if (m_tci) m_tci->send("trx:0,true,tci;");
     m_streaming = true;                       // tone streamer begins
     // Hard ceiling: dwell + 2 s margin. Normal path stops it in endKeydown.
     m_watchdog->start(dwellMs + 2000);
@@ -676,7 +683,7 @@ void CalibrationPanel::unkey()
     m_streaming = false;
     m_watchdog->stop();
     if (m_tci && !m_dry) {
-        m_tci->send("trx:0,false;");
+        m_tci->send("trx:0,false,tci;");
         m_tci->send("tune:0,false;");
     }
 }
