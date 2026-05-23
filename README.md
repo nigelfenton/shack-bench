@@ -113,6 +113,44 @@ TCI Monitor) can connect to it offline — no radio involved.
   all interfaces (for WSJT-X on another machine); choosing 40001/50001
   requires an explicit confirm.
 
+### TX Cal
+
+Closed-loop **WSJT-X TX-drive calibration**.  Sweeps `tx_gain` against
+the radio's ALC peak meter, finds the highest setting that keeps ALC at
+or below a configurable target (default −10 dBFS), and recommends a
+single `tx_gain` value to apply.  The injected test tone is generated
+inside the panel as TCI TX-audio frames — no external harness required.
+
+![TX Cal panel — calibration curve and "how to apply" guidance](docs/tx-cal-curve.png)
+
+The result is shown as a curve (forward power and ALC peak vs `tx_gain`)
+alongside a step-by-step "how to apply" panel — including the exact TCI
+command, the matching WSJT-X / JTDX settings, and the operator
+pre-flight checks (PROC off, RN2 off, dummy load, etc.).
+
+Same defensive model as the Console tab — armed-to-send (resets OFF
+each launch), per-keydown SWR/timeout watchdog, always-live
+**STOP / UNKEY NOW**.  On a live armed start the panel also auto-sets
+the slice to DIGU (and restores the original mode at the end) so
+AetherSDR reliably routes TCI audio via the DAX TX path regardless of
+the slice's operating mode.
+
+Every saved CSV carries:
+
+- run timestamp
+- TCI Monitor build identity (git hash, branch, dirty flag, commit
+  date, compile date, host OS — baked at CMake configure time)
+- AetherSDR server identity (`device:` / `protocol:` / `software:`)
+- a **WARNING** block if forward power stayed at 0 W across the whole
+  sweep (no carrier produced → TX audio routing problem in AetherSDR);
+  the recommendation is suppressed in that case
+
+Requires an AetherSDR carrying
+[aethersdr/AetherSDR#2950](https://github.com/aethersdr/AetherSDR/pull/2950)
+(the `tx_gain` TCI command and the `alc` field on `tx_sensors`); the
+panel detects a missing `alc` field on the first keyed point and
+refuses the run with a clear diagnostic message.
+
 ## Capture file format
 
 A `.tcicap` file is plain UTF-8 text:
