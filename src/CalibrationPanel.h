@@ -140,6 +140,14 @@ private:
     QString m_serverProtocol;    // latest protocol:<...>
     QString m_serverDevice;      // latest device:<...>
 
+    // Slice-mode auto-management: cal needs the slice in a digital mode
+    // (DIGU) so AetherSDR's TciServer routes TCI audio via the DAX path
+    // reliably. We capture the current mode from incoming TCI broadcasts,
+    // force DIGU at run start (live runs only), and restore it on
+    // concludeRun / abort.
+    QString m_currentMode;       // latest modulation:0,<mode> seen
+    QString m_savedMode;         // mode to restore; empty = no change pending
+
     // Per-point telemetry accumulator
     QVector<double> m_sFwd, m_sSwr, m_sAlc;
     bool   m_haveAlc{false};

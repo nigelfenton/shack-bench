@@ -449,6 +449,23 @@ void CalibrationPanel::onStartClicked()
     if (!m_dry && m_tci)
         m_tci->send("tx_sensors_enable:true;");
 
+    // Auto-set slice 0 to DIGU for the duration of the run, restored at
+    // conclude/abort. Calibration needs the digital-mode TX path so
+    // AetherSDR's TciServer reliably routes TCI audio via DAX — voice
+    // modes (USB/LSB/AM/FM/CW) stay on the mic path and the audio never
+    // reaches the modulator unless the macOS HostedDaxBridge happens to
+    // be asserting transmit dax=1 from elsewhere (fragile state).
+    m_savedMode.clear();
+    if (!m_dry && m_tci && !m_currentMode.isEmpty()
+        && m_currentMode != "digu" && m_currentMode != "digl"
+        && m_currentMode != "rtty" && m_currentMode != "fdv"
+        && m_currentMode != "fdvu" && m_currentMode != "fdvl") {
+        m_savedMode = m_currentMode;
+        m_tci->send("modulation:0,digu;");
+        log(QString("auto-set slice 0 mode: %1 → DIGU (restored at end)")
+                .arg(m_savedMode.toUpper()), "#ffaa00");
+    }
+
     setRunning(true);
     startPass(coarse, /*finePass=*/false);
 }
@@ -679,6 +696,14 @@ void CalibrationPanel::concludeRun(int recGain)
                            "ALC target.");
         log("run finished — no knee found", "#ffaa00");
     }
+    // Restore the slice mode if we forced DIGU for the run.
+    if (!m_savedMode.isEmpty() && m_tci) {
+        m_tci->send(QString("modulation:0,%1;").arg(m_savedMode));
+        log(QString("restored slice 0 mode: DIGU → %1")
+                .arg(m_savedMode.toUpper()), "#6b8099");
+        m_savedMode.clear();
+    }
+
     if (!m_allRows.isEmpty()) m_saveBtn->setEnabled(true);
     updateResultsText();
     persist();
@@ -694,6 +719,14 @@ void CalibrationPanel::abort(const QString& reason)
     m_phase = Phase::Idle;
     setRunning(false);
     m_progress->setText(QString("aborted — %1").arg(reason));
+    // Restore the slice mode if we forced DIGU for the (now aborted) run.
+    if (!m_savedMode.isEmpty() && m_tci) {
+        m_tci->send(QString("modulation:0,%1;").arg(m_savedMode));
+        log(QString("restored slice 0 mode: DIGU → %1 (after abort)")
+                .arg(m_savedMode.toUpper()), "#6b8099");
+        m_savedMode.clear();
+    }
+
     if (!m_allRows.isEmpty()) {
         m_saveBtn->setEnabled(true);
         redrawPlot();
@@ -762,6 +795,15 @@ void CalibrationPanel::noteIncoming(const QString& line)
         else if (cmd == "protocol") m_serverProtocol = val;
         else if (cmd == "device")   m_serverDevice   = val;
         return;
+    }
+
+    // Track current slice 0 mode so onStartClicked can decide whether to
+    // force DIGU for the cal run.
+    if (cmd == "modulation" || cmd == "mode") {
+        const QStringList a = line.mid(colon + 1).split(',');
+        if (a.size() >= 2 && a[0].trimmed() == "0")
+            m_currentMode = a[1].trimmed().toLower().remove(';');
+        // fall through — we don't return; mode lines don't carry tx_sensors
     }
 
     if (cmd != "tx_sensors") return;
