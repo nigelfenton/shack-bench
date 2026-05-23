@@ -31,6 +31,7 @@ class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
+class QTextEdit;
 class QTimer;
 
 namespace TciMon {
@@ -86,6 +87,7 @@ private:
     void redrawPlot();
     void persist();
     void restore();
+    void updateResultsText();  // refresh the results + how-to-apply text box
 
     TciClient* m_tci{};
 
@@ -105,6 +107,7 @@ private:
     QLabel*         m_result{};
     QPlainTextEdit* m_transcript{};
     CalPlot*        m_plot{};
+    QTextEdit*      m_resultsText{};
 
     // Timers
     QTimer* m_step{};

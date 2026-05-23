@@ -22,6 +22,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QTextEdit>
 #include <QTextStream>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -285,8 +286,26 @@ void CalibrationPanel::buildUI()
     m_progress->setStyleSheet(kCaptionStyle);
     v->addWidget(m_progress);
 
-    m_plot = new CalPlot;
-    v->addWidget(m_plot, 1);
+    // Plot at ~1/3 width on the left; results + how-to-apply text takes
+    // the remaining 2/3 on the right. The text panel turns the cal output
+    // into something an operator can act on without rereading a CSV.
+    {
+        auto* row = new QHBoxLayout;
+        row->setSpacing(8);
+        m_plot = new CalPlot;
+        row->addWidget(m_plot, 1);
+
+        m_resultsText = new QTextEdit;
+        m_resultsText->setReadOnly(true);
+        m_resultsText->setStyleSheet(
+            "QTextEdit { background-color: #050a14; color: #dde6f0; "
+            "border: 1px solid #1c2a40; padding: 6px; "
+            "font-family: Consolas, 'Cascadia Mono', monospace; "
+            "font-size: 11px; }");
+        row->addWidget(m_resultsText, 2);
+        v->addLayout(row, 1);
+    }
+    updateResultsText();
 
     m_result = new QLabel("—");
     m_result->setStyleSheet(
@@ -441,10 +460,10 @@ void CalibrationPanel::onStopClicked()
     } else {
         // Emergency unkey even outside a run.
         if (m_tci) {
-            m_tci->send("trx:0,false,tci;");
+            m_tci->send("trx:0,false;");
             m_tci->send("tune:0,false;");
         }
-        log("manual unkey — sent trx:0,false,tci; tune:0,false;", "#ff5050");
+        log("manual unkey — sent trx:0,false; tune:0,false;", "#ff5050");
     }
 }
 
@@ -510,14 +529,16 @@ void CalibrationPanel::beginKeydown()
         m_step->start(std::min(dwellMs, 400));
         return;
     }
-    // The ",tci" source argument is required: it forces AetherSDR's
-    // TciServer to take the DAX path (transmit set dax=1) and route the
-    // dax_tx stream to the modulator. Without it, AE only picks the DAX
-    // path when the slice is already in a digital mode (DIGU/DIGL/etc.);
-    // for voice modes (USB/LSB/AM/FM/CW) it stays on the mic path
-    // (transmit set dax=0) and silently discards every TCI audio packet.
-    // — AetherSDR src/core/TciServer.cpp:627-661 (#2304).
-    if (m_tci) m_tci->send("trx:0,true,tci;");
+    // Bare "trx:0,true;" lets AetherSDR's TciServer take the PTT-coordinator
+    // path (the wantDax=false branch) — radio is keyed without entering the
+    // TX_CHRONO protocol. The DAX routing required for TCI audio to reach
+    // the modulator must come from elsewhere: the slice's DAX RX button on
+    // (macOS HostedDaxBridge asserts transmit dax=1 per key), or the slice
+    // in a digital mode. We do NOT pass ",tci" here because TciServer's tci
+    // path enables TX_CHRONO timing — which TCI Monitor doesn't yet honor —
+    // and the resulting chrono stalls make ~half the keys fail to actually
+    // transmit. Re-enable ",tci" once the panel speaks TX_CHRONO properly.
+    if (m_tci) m_tci->send("trx:0,true;");
     m_streaming = true;                       // tone streamer begins
     // Hard ceiling: dwell + 2 s margin. Normal path stops it in endKeydown.
     m_watchdog->start(dwellMs + 2000);
@@ -659,6 +680,7 @@ void CalibrationPanel::concludeRun(int recGain)
         log("run finished — no knee found", "#ffaa00");
     }
     if (!m_allRows.isEmpty()) m_saveBtn->setEnabled(true);
+    updateResultsText();
     persist();
 }
 
@@ -675,6 +697,7 @@ void CalibrationPanel::abort(const QString& reason)
     if (!m_allRows.isEmpty()) {
         m_saveBtn->setEnabled(true);
         redrawPlot();
+        updateResultsText();
     }
 }
 
@@ -683,7 +706,7 @@ void CalibrationPanel::unkey()
     m_streaming = false;
     m_watchdog->stop();
     if (m_tci && !m_dry) {
-        m_tci->send("trx:0,false,tci;");
+        m_tci->send("trx:0,false;");
         m_tci->send("tune:0,false;");
     }
 }
@@ -803,6 +826,102 @@ void CalibrationPanel::redrawPlot()
     m_plot->setData(pts, m_kneeGain, m_recGain, m_alcTargetVal);
 }
 
+void CalibrationPanel::updateResultsText()
+{
+    if (m_allRows.isEmpty()) {
+        m_resultsText->setHtml(
+            "<div style='color:#6b8099; font-size:10px;'>"
+            "<i>Run a calibration to see results and how to apply them.</i>"
+            "</div>");
+        return;
+    }
+
+    // Decide what state we're in.
+    double maxFwdEver = 0.0;
+    for (const Row& r : m_allRows) maxFwdEver = std::max(maxFwdEver, r.fwdMax);
+    const bool noCarrier = maxFwdEver <= 0.0;
+
+    Row recRow;
+    bool haveRec = false;
+    if (!noCarrier && m_recGain >= 0) {
+        for (const Row& r : m_allRows) {
+            if (r.gain == m_recGain) { recRow = r; haveRec = true; break; }
+        }
+    }
+
+    constexpr const char* kSect =
+        "color:#6b8099; font-size:10px; font-weight:bold; "
+        "letter-spacing:0.08em; margin-top:10px;";
+
+    QString html;
+    html.reserve(2048);
+    html += QString("<div style='%1 margin-top:0;'>RESULT</div>").arg(kSect);
+
+    if (haveRec) {
+        html += QString(
+            "<p><span style='color:#ffd400; font-size:14px; font-weight:bold;'>"
+            "Recommended tx_gain = %1</span><br>"
+            "Forward power: <b>~%2 W</b> into dummy load<br>"
+            "ALC peak: <b>%3 dBFS</b> (target %4 dBFS)<br>"
+            "SWR: %5</p>")
+            .arg(m_recGain)
+            .arg(recRow.fwdAvg, 0, 'f', 1)
+            .arg(recRow.alcMax, 0, 'f', 1)
+            .arg(m_alcTargetVal, 0, 'f', 0)
+            .arg(recRow.swrAvg, 0, 'f', 2);
+
+        html += QString("<div style='%1'>HOW TO APPLY</div>").arg(kSect);
+        html += QString(
+            "<p><b style='color:#00d8ef;'>In AetherSDR (slice TX panel):</b><br>"
+            "&nbsp;&bull; Set the TCI <b>tx_gain</b> to <b>%1</b><br>"
+            "&nbsp;&bull; Or send TCI command: "
+            "<span style='color:#4cff7c;'>tx_gain:0,%1;</span></p>")
+            .arg(m_recGain);
+        html +=
+            "<p><b style='color:#00d8ef;'>In WSJT-X / JTDX / digital-mode client:</b><br>"
+            "&nbsp;&bull; Pin the <b>Pwr slider at 100&#37;</b> — the calibration "
+            "assumes full-scale audio at the client<br>"
+            "&nbsp;&bull; Mic source: <b>PC</b> / DAX TX<br>"
+            "&nbsp;&bull; <b>Speech processor (PROC) OFF</b> — it's non-linear "
+            "and invalidates the calibration<br>"
+            "&nbsp;&bull; <b>RN2 / RNNoise OFF</b> for the same reason</p>";
+        html += QString(
+            "<p><b style='color:#00d8ef;'>Verify on air:</b><br>"
+            "Watch the radio's ALC meter during a steady-tone burst. It should "
+            "just touch the <b>%1 dBFS</b> line.<br>"
+            "&nbsp;&bull; If ALC pegs higher &rarr; drop tx_gain by 2&ndash;3<br>"
+            "&nbsp;&bull; If ALC sits well below &rarr; you have headroom (cal "
+            "was conservative)</p>")
+            .arg(m_alcTargetVal, 0, 'f', 0);
+    } else if (noCarrier) {
+        html += "<p style='color:#ff8080;'><b>No carrier produced</b> &mdash; "
+                "the radio was keyed but no audio reached the modulator.</p>";
+        html += QString("<div style='%1'>WHAT TO CHECK</div>").arg(kSect);
+        html +=
+            "<p>&nbsp;&bull; In AetherSDR, set the slice's TX source to "
+            "<b>PC</b> / DAX TX<br>"
+            "&nbsp;&bull; Make sure DAX TX is assigned (the slice's DAX "
+            "button on)<br>"
+            "&nbsp;&bull; Confirm <b>PROC</b> and <b>RN2</b> are OFF<br>"
+            "&nbsp;&bull; On macOS the slice's DAX RX button being on lets "
+            "HostedDaxBridge assert <tt>transmit dax=1</tt> per key &mdash; "
+            "without it, voice-mode slices won't route TCI audio</p>";
+    } else {
+        html += "<p style='color:#ffaa00;'><b>No recommendation</b> &mdash; "
+                "sweep didn't find a clean knee.</p>";
+        html += QString("<div style='%1'>TRY</div>").arg(kSect);
+        html += QString(
+            "<p>&nbsp;&bull; Widen the coarse sweep (lower values, e.g. "
+            "<tt>5,10,15,20,25,30...</tt>)<br>"
+            "&nbsp;&bull; Or raise the ALC target above %1 dBFS if all points "
+            "were under it<br>"
+            "&nbsp;&bull; Confirm slice is in a TX-capable mode and PROC is "
+            "off</p>")
+            .arg(m_alcTargetVal, 0, 'f', 0);
+    }
+    m_resultsText->setHtml(html);
+}
+
 void CalibrationPanel::setRunning(bool running)
 {
     m_running = running;
@@ -881,6 +1000,7 @@ void CalibrationPanel::restore()
             m_result->setText(
                 QString("Last run — recommended tx_gain = %1").arg(m_recGain));
         redrawPlot();
+        updateResultsText();
         log(QString("restored last calibration — %1 points")
                 .arg(m_allRows.size()), "#6b8099");
     }
