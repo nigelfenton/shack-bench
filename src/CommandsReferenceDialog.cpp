@@ -104,6 +104,13 @@ CommandsReferenceDialog::CommandsReferenceDialog(QWidget* parent)
         m_syntaxLabel->setStyleSheet(kCodeStyle);
         m_syntaxLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
         m_syntaxLabel->setWordWrap(true);
+        // Long, whitespace-free syntax tokens (e.g.
+        // rx_clicked_on_spot:<rx>,<channel>,<call>,<hz>;) would otherwise
+        // demand the full token width as minimum, forcing the right pane
+        // wider than the viewport and clipping the description column.
+        // Ignored horizontal policy lets the layout shrink us; wordWrap
+        // then falls back to character-level breaking.
+        m_syntaxLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         rv->addWidget(m_syntaxLabel);
 
         auto* catCap = new QLabel("CATEGORY");

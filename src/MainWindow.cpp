@@ -63,8 +63,9 @@ constexpr const char* kCaptionStyle =
 // Color used in the raw log for each message family.
 constexpr const char* kColorVfo     = "#00d8ef";   // cyan
 constexpr const char* kColorMode    = "#00d8ef";
-constexpr const char* kColorSpot    = "#4cff7c";   // green
-constexpr const char* kColorSpotDel = "#ffaa00";   // amber
+constexpr const char* kColorSpot      = "#4cff7c"; // green — spot injection
+constexpr const char* kColorSpotClick = "#a8ff8c"; // pale green — clicked_on_spot
+constexpr const char* kColorSpotDel   = "#ffaa00"; // amber
 constexpr const char* kColorMeta    = "#6b8099";   // muted (start, ready, protocol)
 constexpr const char* kColorErr     = "#ff5050";
 constexpr const char* kColorOther   = "#dde6f0";   // default
@@ -453,6 +454,8 @@ void MainWindow::onRawMessage(const QString& line)
     if      (cmd == "vfo")           color = kColorVfo;
     else if (cmd == "mode" || cmd == "modulation") color = kColorMode;
     else if (cmd == "spot")          color = kColorSpot;
+    else if (cmd == "clicked_on_spot" || cmd == "rx_clicked_on_spot")
+                                     color = kColorSpotClick;
     else if (cmd == "spot_delete" || cmd == "spot_clear") color = kColorSpotDel;
     else if (cmd == "protocol" || cmd == "ready" || cmd == "start")
                                      color = kColorMeta;
@@ -480,9 +483,11 @@ void MainWindow::parseLine(const QString& line)
 
     if      (cmd == "vfo")          handleVfo(args);
     else if (cmd == "mode" || cmd == "modulation") handleMode(args);
-    else if (cmd == "spot")         handleSpot(args);
-    else if (cmd == "spot_delete")  handleSpotDelete(args);
-    else if (cmd == "spot_clear")   handleSpotClear();
+    else if (cmd == "spot")              handleSpot(args);
+    else if (cmd == "clicked_on_spot")    handleSpotClicked(args, /*hasReceiver=*/false);
+    else if (cmd == "rx_clicked_on_spot") handleSpotClicked(args, /*hasReceiver=*/true);
+    else if (cmd == "spot_delete")       handleSpotDelete(args);
+    else if (cmd == "spot_clear")        handleSpotClear();
     else if (cmd == "trx")          handleTrx(args);
     else if (cmd == "tx_sensors")   handleTxSensors(args);
 }
@@ -774,6 +779,28 @@ void MainWindow::handleSpot(const QStringList& args)
 
     m_spotTable->resizeColumnsToContents();
     m_spotTable->scrollToBottom();
+}
+
+void MainWindow::handleSpotClicked(const QStringList& args, bool hasReceiver)
+{
+    // clicked_on_spot:<call>,<hz>;
+    // rx_clicked_on_spot:<rx>,<channel>,<call>,<hz>;
+    // Added in AetherSDR v26.6.1 (#3145); both forms fire as a pair on
+    // every panadapter spot click.  Highlight the matching row in the
+    // spot table so the operator can see which spot AE reports clicked.
+    const int idx = hasReceiver ? 2 : 0;
+    if (args.size() < idx + 2) return;
+    const QString call = args[idx].trimmed();
+    if (call.isEmpty()) return;
+
+    for (int r = m_spotTable->rowCount() - 1; r >= 0; --r) {
+        auto* it = m_spotTable->item(r, 1);
+        if (it && it->text() == call) {
+            m_spotTable->selectRow(r);
+            m_spotTable->scrollToItem(it);
+            break;
+        }
+    }
 }
 
 void MainWindow::handleSpotDelete(const QStringList& args)

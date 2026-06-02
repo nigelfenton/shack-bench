@@ -66,6 +66,7 @@ private:
     void handleVfo(const QStringList& args);
     void handleMode(const QStringList& args);
     void handleSpot(const QStringList& args);
+    void handleSpotClicked(const QStringList& args, bool hasReceiver);
     void handleSpotDelete(const QStringList& args);
     void handleSpotClear();
     void handleTrx(const QStringList& args);        // sweep start/stop

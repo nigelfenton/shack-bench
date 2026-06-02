@@ -269,6 +269,23 @@ const std::vector<TciCommand>& tableData()
           "Typically emitted on disconnect from a DX-cluster source, "
           "or when the operator manually clears the panadapter."
         },
+        { "clicked_on_spot", "Spots",
+          "clicked_on_spot:<call>,<hz>;",
+          "Emitted when the operator clicks a spot on the panadapter.",
+          "Added in AetherSDR v26.6.1 (#3145) for Log4OM / LogHX / "
+          "Swisslog / RUMlogNG interop. Single-RX form. Fires alongside "
+          "rx_clicked_on_spot on every click, and alongside vfo: when "
+          "the click also retunes the slice. Pair with the rx-qualified "
+          "form when receiver context is needed."
+        },
+        { "rx_clicked_on_spot", "Spots",
+          "rx_clicked_on_spot:<rx>,<channel>,<call>,<hz>;",
+          "Receiver-qualified spot-click notification.",
+          "Same trigger as clicked_on_spot, but carries the RX index "
+          "using the same contiguous TCI trx index policy as vfo: and "
+          "modulation:. Channel is always 0 on AetherSDR's single-VFO "
+          "slice path (verified against AE v26.6.1 2026-06-01)."
+        },
 
         // ── I/Q + audio streaming ────────────────────────────────────
         { "iq_samplerate", "I/Q + audio streaming",
