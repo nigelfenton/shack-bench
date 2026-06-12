@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
     QApplication::setOrganizationName("G0JKN");
     QApplication::setOrganizationDomain("g0jkn.uk");
     QApplication::setApplicationName("TCI Monitor");
-    QApplication::setApplicationVersion("0.1.0");
+    QApplication::setApplicationVersion("0.4.0");
 
     QApplication app(argc, argv);
     app.setStyleSheet(kAppStylesheet);

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(TciMonitor
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "Diagnostic monitor for the TCI WebSocket protocol"
     LANGUAGES CXX)
 
