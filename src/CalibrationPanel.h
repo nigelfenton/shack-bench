@@ -129,6 +129,7 @@ private:
     QVector<int> m_queue;        // remaining gains in the running pass
     int    m_kneeGain{-1};
     int    m_recGain{-1};
+    int    m_pointRetries{0};    // re-keys used on the current point
 
     QVector<Row> m_passRows;     // rows from the pass in progress
     QVector<Row> m_coarseRows;   // coarse pass result (for fine fallback)

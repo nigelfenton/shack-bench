@@ -47,6 +47,16 @@ constexpr int    kFrameMs   = 50;       // audio frame streamed per tick
 constexpr int    kSettleMs  = 500;      // settle after setting gain/power
 constexpr double kPi        = 3.14159265358979323846;
 
+// Point-validity guards (added after the 2026-06-12 FLEX-6300 run, where
+// roughly every other keydown failed to actually transmit):
+//  - a point needs at least this many tx_sensors samples to count;
+//  - ALC pinned at the receiver floor with zero forward power means the
+//    radio never made RF — and such a "peak" of -150 dBFS would pass any
+//    ALC target, poisoning knee detection with phantom winners.
+constexpr int    kMinValidSamples  = 2;
+constexpr double kAlcSilenceFloor  = -140.0;   // dBFS — below this = no TX
+constexpr int    kMaxPointRetries  = 2;        // re-keys per starved point
+
 // Append a little-endian uint32 / float32 — TCI audio framing is LE.
 void putU32(QByteArray& b, quint32 v)
 {
@@ -491,6 +501,7 @@ void CalibrationPanel::startPass(const QVector<int>& gains, bool finePass)
     m_finePass = finePass;
     m_queue    = gains;
     m_passRows.clear();
+    m_pointRetries = 0;
     QStringList gs;
     for (int g : gains) gs << QString::number(g);
     log(QString("=== %1 pass — tx_gain %2 ===")
@@ -567,6 +578,27 @@ void CalibrationPanel::endKeydown()
     unkey();                                  // clears streaming, stops watchdog
 
     const Row r = recordPoint();
+
+    // Starved / silent point — the radio never actually transmitted during
+    // the dwell (too few samples, or ALC at the floor with no forward
+    // power). Re-key the same gain instead of recording it: a silent row's
+    // -150 dBFS "peak" would qualify for any ALC target.
+    const bool starved = r.n < kMinValidSamples;
+    const bool silent  = r.n > 0 && r.fwdMax <= 0.0 &&
+                         (!r.hasAlc || r.alcMax <= kAlcSilenceFloor);
+    if (!m_dry && (starved || silent) && m_pointRetries < kMaxPointRetries) {
+        ++m_pointRetries;
+        log(QString("  tx_gain=%1: no real TX captured (n=%2) — retry %3/%4")
+                .arg(m_curGain).arg(r.n)
+                .arg(m_pointRetries).arg(kMaxPointRetries),
+            "#ffaa00");
+        m_queue.prepend(m_curGain);           // same point, after cooldown
+        m_phase = Phase::Cooldown;
+        m_step->start(int(m_cooldown->value() * 1000.0));
+        return;
+    }
+    m_pointRetries = 0;
+
     m_passRows.push_back(r);
     m_allRows.push_back(r);
     redrawPlot();
@@ -833,6 +865,11 @@ void CalibrationPanel::noteIncoming(const QString& line)
                   .arg(swr, 0, 'f', 2).arg(m_swrLimitVal, 0, 'f', 1));
         return;
     }
+    // Key-edge dead sample: zero forward power AND ALC at the floor means
+    // this frame caught the radio before/after actual RF. Counting these
+    // drags alc_avg toward -150 (the wild averages in the 2026-06-12 CSV)
+    // without adding information — drop them.
+    if (fwd <= 0.0 && hasAlc && alc <= kAlcSilenceFloor) return;
     m_sFwd.push_back(fwd);
     m_sSwr.push_back(swr);
     if (hasAlc) m_sAlc.push_back(alc);
@@ -842,9 +879,13 @@ void CalibrationPanel::noteIncoming(const QString& line)
 
 int CalibrationPanel::kneeGain(const QVector<Row>& rows) const
 {
+    // Only points with enough samples AND an actual carrier may qualify —
+    // a no-TX point's floor-level ALC passes any target (2026-06-12 run
+    // recommended a gain whose only "measurement" was one silent sample).
     int best = -1;
     for (const Row& r : rows)
-        if (r.hasAlc && r.alcMax <= m_alcTargetVal && r.gain > best)
+        if (r.hasAlc && r.n >= kMinValidSamples && r.fwdMax > 0.0 &&
+            r.alcMax <= m_alcTargetVal && r.gain > best)
             best = r.gain;
     return best;
 }
