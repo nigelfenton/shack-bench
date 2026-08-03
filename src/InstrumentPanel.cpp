@@ -101,6 +101,7 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
 
     m_tabs = new QTabWidget();
     buildAntennaTab();
+    buildFeedlineTab();
     buildSpectrumTab();
     root->addWidget(m_tabs, 1);
 
@@ -238,6 +239,178 @@ void InstrumentPanel::buildAntennaTab()
     v->addWidget(m_library);
 
     m_tabs->addTab(page, "Antenna");
+}
+
+void InstrumentPanel::buildFeedlineTab()
+{
+    auto* page = new QWidget();
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(6, 6, 6, 6);
+
+    auto* ctl = new QHBoxLayout();
+    ctl->addWidget(new QLabel("Cable:"));
+    m_cableType = new QComboBox();
+    for (const auto& c : cableTypes()) m_cableType->addItem(c.name);
+    connect(m_cableType, &QComboBox::currentIndexChanged,
+            this, &InstrumentPanel::onCableTypeChanged);
+    ctl->addWidget(m_cableType);
+
+    // ⭐ VF is editable, not locked to the catalogue. It is the single
+    // assumption that converts a MEASURED electrical length into a physical
+    // one, and picking the wrong cable is how a healthy line comes to look
+    // lossy. Let the operator override it, and always show what was used.
+    ctl->addWidget(new QLabel("VF:"));
+    m_vf = new QDoubleSpinBox();
+    m_vf->setRange(0.40, 1.00);
+    m_vf->setDecimals(3);
+    m_vf->setSingleStep(0.01);
+    m_vf->setValue(0.66);
+    m_vf->setToolTip("Velocity factor. This is an ASSUMPTION, not a "
+                     "measurement — it scales the physical length and "
+                     "therefore the loss-per-foot verdict.");
+    connect(m_vf, &QDoubleSpinBox::valueChanged, this,
+            [this](double) { onAnalyseCoax(); });
+    ctl->addWidget(m_vf);
+    ctl->addStretch();
+    v->addLayout(ctl);
+
+    auto* cap = new QHBoxLayout();
+    m_takeOpen = new QPushButton("Take OPEN sweep");
+    connect(m_takeOpen, &QPushButton::clicked, this,
+            &InstrumentPanel::onTakeOpenClicked);
+    cap->addWidget(m_takeOpen);
+    m_openState = new QLabel("— not captured —");
+    m_openState->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
+    cap->addWidget(m_openState, 1);
+
+    m_takeShort = new QPushButton("Take SHORT sweep");
+    connect(m_takeShort, &QPushButton::clicked, this,
+            &InstrumentPanel::onTakeShortClicked);
+    cap->addWidget(m_takeShort);
+    m_shortState = new QLabel("— not captured —");
+    m_shortState->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
+    cap->addWidget(m_shortState, 1);
+    v->addLayout(cap);
+
+    m_plotCoax = new TracePlot();
+    m_plotCoax->setUnit(TracePlot::Unit::Ohms);
+    m_plotCoax->setTitle("R for both far-end conditions — they must INVERT");
+    m_plotCoax->setPlaceholder(
+        "Capture an OPEN and a SHORT at the same far end.\n"
+        "A quarter-wave open looks like a short and vice versa; that swap is\n"
+        "what proves the far-end condition was what you thought it was.");
+    v->addWidget(m_plotCoax, 1);
+
+    m_coaxReport = new QPlainTextEdit();
+    m_coaxReport->setReadOnly(true);
+    m_coaxReport->setMinimumHeight(190);
+    m_coaxReport->setStyleSheet(
+        "background:#050a14; color:#cfe3ff; font-family:Consolas;");
+    m_coaxReport->setPlainText(
+        "Feedline analysis — open/short pair.\n\n"
+        "  Z0     = sqrt(Zoc * Zsc)\n"
+        "  loss   = 8.686 * Re(atanh(sqrt(Zsc / Zoc)))\n"
+        "  length : X crosses zero every QUARTER wavelength on a shorted line\n\n"
+        "Capture both ends to begin.");
+    v->addWidget(m_coaxReport);
+
+    m_tabs->addTab(page, "Feedline");
+}
+
+void InstrumentPanel::onCableTypeChanged(int index)
+{
+    const auto& types = cableTypes();
+    if (index < 0 || index >= types.size()) return;
+    m_vf->setValue(types[index].vf);   // triggers a re-analysis
+}
+
+void InstrumentPanel::onTakeOpenClicked()
+{
+    m_capturingOpen = true;
+    m_capturingShort = false;
+    log("capturing the OPEN sweep — leave the far end DISCONNECTED and clear "
+        "of metal.");
+    onSweepClicked();
+}
+
+void InstrumentPanel::onTakeShortClicked()
+{
+    m_capturingShort = true;
+    m_capturingOpen = false;
+    log("capturing the SHORT sweep — short the SAME far end.");
+    onSweepClicked();
+}
+
+void InstrumentPanel::onAnalyseCoax()
+{
+    if (m_openSweep.points.isEmpty() || m_shortSweep.points.isEmpty()) return;
+
+    CableType cable;
+    const auto& types = cableTypes();
+    const int idx = m_cableType ? m_cableType->currentIndex() : -1;
+    if (idx >= 0 && idx < types.size()) cable = types[idx];
+    cable.vf = m_vf->value();          // the override wins
+
+    const CoaxResult r = analyseOpenShort(m_openSweep, m_shortSweep, cable);
+
+    // Plot R for both, so the inversion is visible rather than merely asserted.
+    TracePlot::Trace o, s;
+    o.label = "open";  o.color = QColor("#ffb454");
+    s.label = "short"; s.color = QColor("#4fc3f7");
+    for (const auto& p : m_openSweep.points)  o.points.insert(p.hz, p.r);
+    for (const auto& p : m_shortSweep.points) s.points.insert(p.hz, p.r);
+    m_plotCoax->setTraces({o, s});
+
+    QStringList t;
+    if (!r.ok) {
+        t << "ANALYSIS FAILED" << ("  " + r.error);
+        m_coaxReport->setPlainText(t.join('\n'));
+        return;
+    }
+
+    t << "FEEDLINE — open/short pair";
+    t << "";
+    t << "  integrity";
+    t << QString("    impossible points   open %1, short %2  (want 0)")
+             .arg(r.impossibleOpen).arg(r.impossibleShort);
+    t << QString("    R inversion         %1  (%2 quarter-wave points)")
+             .arg(r.inversionConfirmed ? "CONFIRMED" : "*** NOT SEEN ***")
+             .arg(r.inversionPoints);
+    if (!r.inversionConfirmed)
+        t << "    ^^ the two sweeps do not invert. One far-end condition was"
+             "\n       probably not what you thought — do not trust the numbers.";
+    t << "";
+    t << "  length";
+    t << QString("    X zero-crossings    %1, mean spacing %2 MHz (spread %3%)")
+             .arg(r.crossingsMhz.size())
+             .arg(r.meanSpacingMhz, 0, 'f', 4)
+             .arg(r.spacingSpreadPct, 0, 'f', 1);
+    t << QString("    electrical length   %1 m   [MEASURED]")
+             .arg(r.electricalHalfWaveM, 0, 'f', 2);
+    t << QString("    physical length     %1 m = %2 ft   [assumes VF %3]")
+             .arg(r.physicalLengthM, 0, 'f', 2)
+             .arg(r.physicalLengthFt, 0, 'f', 1)
+             .arg(r.assumedVf, 0, 'f', 3);
+    t << "";
+    t << "  impedance and loss";
+    t << QString("    mean |Z0|           %1 ohm").arg(r.meanZ0, 0, 'f', 1);
+    t << QString("    loss at %1 MHz     %2 dB measured")
+             .arg(r.topMhz, 0, 'f', 1).arg(r.measuredLossAtTopDb, 0, 'f', 2);
+    if (r.specLossAtTopDb > 0.01)
+        t << QString("    %1 spec            %2 dB over %3 ft")
+                 .arg(r.cableName).arg(r.specLossAtTopDb, 0, 'f', 2)
+                 .arg(r.physicalLengthFt, 0, 'f', 0);
+    t << QString("    verdict             %1").arg(r.verdict);
+    t << "";
+    t << "  ⚠ The physical length and therefore the loss verdict depend on the";
+    t << "    velocity factor above. Electrical length is measured; VF is not.";
+
+    m_coaxReport->setPlainText(t.join('\n'));
+    log(QString("feedline: %1 ft at VF %2, |Z0| %3 ohm, %4")
+            .arg(r.physicalLengthFt, 0, 'f', 1)
+            .arg(r.assumedVf, 0, 'f', 3)
+            .arg(r.meanZ0, 0, 'f', 1)
+            .arg(r.verdict));
 }
 
 void InstrumentPanel::buildSpectrumTab()
@@ -442,6 +615,24 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
 
     m_live = result;
     m_live.antennaNote = m_antNote->text().trimmed();
+
+    // If this sweep was armed from the Feedline tab, file it as the open or
+    // short half and re-analyse as soon as both are present.
+    if (m_capturingOpen || m_capturingShort) {
+        const QString when =
+            QDateTime::currentDateTime().toString("HH:mm:ss");
+        if (m_capturingOpen) {
+            m_openSweep = result;
+            m_openState->setText(QString("captured %1  (%2 pts)")
+                                     .arg(when).arg(result.points.size()));
+        } else {
+            m_shortSweep = result;
+            m_shortState->setText(QString("captured %1  (%2 pts)")
+                                      .arg(when).arg(result.points.size()));
+        }
+        m_capturingOpen = m_capturingShort = false;
+        onAnalyseCoax();
+    }
 
     // Guardrail 4: report impossible physics loudly rather than plotting it as
     // though it were a measurement.

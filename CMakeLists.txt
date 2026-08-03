@@ -96,6 +96,7 @@ set(TCIMON_SOURCES
     src/SwrPlot.cpp
     src/TracePlot.cpp
     src/Instrument.cpp
+    src/CoaxAnalysis.cpp
     src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
@@ -187,3 +188,16 @@ target_link_libraries(instrument_probe_test PRIVATE
     Qt6::SerialPort
 )
 set_target_properties(instrument_probe_test PROPERTIES AUTOMOC ON)
+
+# ── Coax open/short analysis test ─────────────────────────────────────────
+# Pure maths, no hardware: validated against a synthetic line with closed-form
+# truth AND against the velocity-factor trap that made a healthy DXE-400 run
+# look 25-40% lossy on 2026-08-03.
+add_executable(coax_analysis_test
+    tests/coax_analysis_test.cpp
+    src/CoaxAnalysis.cpp
+)
+target_include_directories(coax_analysis_test PRIVATE src)
+target_link_libraries(coax_analysis_test PRIVATE Qt6::Core Qt6::SerialPort)
+set_target_properties(coax_analysis_test PROPERTIES AUTOMOC ON)
+add_test(NAME coax_analysis_test COMMAND coax_analysis_test)

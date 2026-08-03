@@ -24,6 +24,7 @@
 #include <QVector>
 #include <QString>
 
+#include "CoaxAnalysis.h"
 #include "Instrument.h"
 
 class QComboBox;
@@ -64,10 +65,15 @@ private slots:
     void onExportCsvClicked();
     void onBandPresetChanged(int index);
     void onCursorMoved(qint64 hz);
+    void onTakeOpenClicked();
+    void onTakeShortClicked();
+    void onCableTypeChanged(int index);
+    void onAnalyseCoax();
 
 private:
     void buildAntennaTab();
     void buildSpectrumTab();
+    void buildFeedlineTab();
     void log(const QString& line);
     void refreshPlots();
     void setBusy(bool busy);
@@ -100,6 +106,20 @@ private:
     QPushButton*    m_saSweep = nullptr;
     QLabel*         m_saStatus = nullptr;
     TracePlot*      m_plotSa = nullptr;
+
+    // --- feedline tab (open/short pair) ---
+    QComboBox*      m_cableType = nullptr;
+    QDoubleSpinBox* m_vf = nullptr;          // editable; the catalogue seeds it
+    QPushButton*    m_takeOpen = nullptr;
+    QPushButton*    m_takeShort = nullptr;
+    QLabel*         m_openState = nullptr;
+    QLabel*         m_shortState = nullptr;
+    QPlainTextEdit* m_coaxReport = nullptr;
+    TracePlot*      m_plotCoax = nullptr;
+    SweepResult     m_openSweep;
+    SweepResult     m_shortSweep;
+    bool            m_capturingOpen = false;   // which button armed the sweep
+    bool            m_capturingShort = false;
 
     // --- shared ---
     QListWidget*    m_library = nullptr;
