@@ -3,12 +3,15 @@
 // Instrument — serial-attached bench instruments (antenna analysers and a
 // spectrum analyser), driven from their PUBLISHED ASCII command sets.
 //
-// LICENCE NOTE (load-bearing): TCI Monitor is MIT. NanoVNA-Saver is GPLv3 and
-// NanoVNA-QT/libxavna is GPL; vendoring either would relicense this whole app
-// as a side effect of a diagnostic feature. Everything here is written from
-// vendor documentation and from live probing of the hardware in the shack. A
-// wire protocol is not copyrightable expression -- same footing as the TCI and
-// Metis work already in this app.
+// PROVENANCE: every driver here is written from the vendors' PUBLISHED ASCII
+// command sets and from live probing of the hardware in the shack -- not
+// copied from NanoVNA-Saver, NanoVNA-QT or libxavna. A wire protocol is not
+// copyrightable expression, the same footing as the TCI and Metis work already
+// in this app.
+//
+// (Shack-Bench was MIT when this was written, which made vendoring those GPL
+// projects a licence problem. It is now GPL-3.0, so reuse would be permitted --
+// but the clean-room provenance is worth keeping on the record regardless.)
 //
 // Threading: a sweep can take minutes (an AA-170 FRX120 across 2-30 MHz took
 // ~2 minutes), so drivers run on their own QThread and report progress. The

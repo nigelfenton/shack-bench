@@ -1,6 +1,6 @@
 #pragma once
 
-// MainWindow — TCI Monitor's only window.
+// MainWindow — Shack-Bench's only window.
 //
 // Layout:
 //   • Top connect bar  — host + port + [Connect]/[Disconnect] + status

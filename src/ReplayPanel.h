@@ -2,7 +2,7 @@
 
 // ReplayPanel — record the live TCI stream to a file, and replay any
 // capture back as a local TCI WebSocket *server* so another client
-// (WSJT-X, ShackLog, a second TCI Monitor) can connect to it offline.
+// (WSJT-X, ShackLog, a second Shack-Bench) can connect to it offline.
 //
 // Replay never touches a real radio — it stands up its own
 // QWebSocketServer on localhost and feeds recorded lines with their

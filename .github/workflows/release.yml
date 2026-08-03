@@ -1,4 +1,4 @@
-# TCI Monitor release workflow.
+# Shack-Bench release workflow.
 #
 # Trigger:
 #   git tag v0.1.0
@@ -58,18 +58,18 @@ jobs:
           if ([string]::IsNullOrEmpty($version) -or -not $version.StartsWith("v")) {
               $version = "dev-$($env:GITHUB_SHA.Substring(0,7))"
           }
-          $stage = "TciMonitor-$version-windows-x64"
+          $stage = "ShackBench-$version-windows-x64"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
           # Top-level runtime files: exe + DLLs deployed by windeployqt.
-          Copy-Item build\TciMonitor.exe $stage\
+          Copy-Item build\ShackBench.exe $stage\
           Get-ChildItem build\*.dll | Copy-Item -Destination $stage\
           if (Test-Path build\vc_redist.x64.exe) {
               Copy-Item build\vc_redist.x64.exe $stage\
           }
 
           # Plugin directories windeployqt creates.  No sqldrivers here —
-          # TciMonitor doesn't link Qt6::Sql.
+          # ShackBench doesn't link Qt6::Sql.
           $pluginDirs = @('platforms','styles','imageformats',
                           'iconengines','tls','networkinformation','generic')
           foreach ($d in $pluginDirs) {
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-zip
-          path: TciMonitor-*-windows-x64.zip
+          path: ShackBench-*-windows-x64.zip
           if-no-files-found: error
 
       - name: Build Inno Setup installer
@@ -95,7 +95,7 @@ jobs:
           if ([string]::IsNullOrEmpty($version) -or -not $version.StartsWith("v")) {
               $version = "dev-$($env:GITHUB_SHA.Substring(0,7))"
           }
-          $stage = "TciMonitor-$version-windows-x64"
+          $stage = "ShackBench-$version-windows-x64"
 
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
@@ -107,15 +107,15 @@ jobs:
 
           $env:TCIMON_VERSION = $version.TrimStart("v")
           $env:TCIMON_STAGING = (Resolve-Path $stage).Path
-          & $iscc /O. installer\tcimonitor.iss
+          & $iscc /O. installer\shackbench.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
 
-          Get-ChildItem TciMonitor-Setup-*.exe
+          Get-ChildItem ShackBench-Setup-*.exe
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: TciMonitor-Setup-*-windows-x64.exe
+          path: ShackBench-Setup-*-windows-x64.exe
           if-no-files-found: error
 
   # ── Linux (AppImage) ────────────────────────────────────────────────────
@@ -157,14 +157,14 @@ jobs:
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          cp build/TciMonitor AppDir/usr/bin/
+          cp build/ShackBench AppDir/usr/bin/
 
           cat > AppDir/usr/share/applications/tcimonitor.desktop <<'EOF'
           [Desktop Entry]
           Type=Application
-          Name=TCI Monitor
+          Name=Shack-Bench
           GenericName=TCI Protocol Diagnostic
-          Exec=TciMonitor
+          Exec=ShackBench
           Icon=tcimonitor
           Comment=Diagnostic monitor for the TCI WebSocket protocol
           Categories=HamRadio;Network;
@@ -192,13 +192,13 @@ jobs:
               --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/tcimonitor.png
 
           version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
-          mv TCI*Monitor*.AppImage "TciMonitor-${version}-linux-x86_64.AppImage"
-          ls -lh TciMonitor-*.AppImage
+          mv TCI*Monitor*.AppImage "ShackBench-${version}-linux-x86_64.AppImage"
+          ls -lh ShackBench-*.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: TciMonitor-*-linux-x86_64.AppImage
+          path: ShackBench-*-linux-x86_64.AppImage
           if-no-files-found: error
 
   # ── macOS (Apple Silicon) ───────────────────────────────────────────────
@@ -228,16 +228,16 @@ jobs:
 
       - name: macdeployqt + DMG
         run: |
-          "$QT_ROOT_DIR/bin/macdeployqt" build/TciMonitor.app
+          "$QT_ROOT_DIR/bin/macdeployqt" build/ShackBench.app
 
           version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
-          dmg_name="TciMonitor-${version}-macos-arm64.dmg"
+          dmg_name="ShackBench-${version}-macos-arm64.dmg"
 
           mkdir -p dmg-stage
-          cp -R build/TciMonitor.app dmg-stage/
+          cp -R build/ShackBench.app dmg-stage/
           cp README.md LICENSE dmg-stage/
 
-          hdiutil create -volname "TCI Monitor" \
+          hdiutil create -volname "Shack-Bench" \
               -srcfolder dmg-stage \
               -ov -format UDZO \
               "$dmg_name"
@@ -246,7 +246,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: TciMonitor-*-macos-arm64.dmg
+          path: ShackBench-*-macos-arm64.dmg
           if-no-files-found: error
 
   # ── Publish GitHub Release ──────────────────────────────────────────────
@@ -269,7 +269,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          name: TCI Monitor ${{ github.ref_name }}
+          name: Shack-Bench ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true

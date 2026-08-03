@@ -2,7 +2,7 @@
 
 // ConsolePanel — guarded free-text TCI command sender.
 //
-// This is the only part of TCI Monitor that can key the radio, so it is
+// This is the only part of Shack-Bench that can key the radio, so it is
 // deliberately defensive, mirroring the tci_sweep.py philosophy:
 //
 //   • Dry-run by default.  The arm state is NOT persisted and resets to

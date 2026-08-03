@@ -1,10 +1,10 @@
-# TCI Monitor
+# Shack-Bench
 
 A lightweight diagnostic tool for the **TCI** (Transceiver Control Interface)
 WebSocket protocol used by AetherSDR, ExpertSDR2, SunSDR, and similar SDR
 applications.
 
-TCI Monitor connects to a TCI server, lets you see every raw message the
+Shack-Bench connects to a TCI server, lets you see every raw message the
 server sends, and pulls structured information out of common events (VFO,
 mode, spots).  Useful when you're debugging a TCI client, exploring what
 events a server emits in a given workflow, or just curious about the wire
@@ -13,15 +13,15 @@ protocol.
 ## Download
 
 Pre-built binaries — including a Windows installer — are on the
-[**Releases page**](https://github.com/nigelfenton/tci-monitor/releases/latest):
+[**Releases page**](https://github.com/nigelfenton/shack-bench/releases/latest):
 
-- **Windows installer** — `TciMonitor-Setup-<version>-windows-x64.exe`
+- **Windows installer** — `ShackBench-Setup-<version>-windows-x64.exe`
   (double-click to install)
-- **Windows portable zip** — `TciMonitor-<version>-windows-x64.zip`
-  (unzip and run `TciMonitor.exe`)
-- **Linux AppImage** — `TciMonitor-<version>-linux-x86_64.AppImage`
+- **Windows portable zip** — `ShackBench-<version>-windows-x64.zip`
+  (unzip and run `ShackBench.exe`)
+- **Linux AppImage** — `ShackBench-<version>-linux-x86_64.AppImage`
   (`chmod +x` and run)
-- **macOS DMG (Apple Silicon)** — `TciMonitor-<version>-macos-arm64.dmg`
+- **macOS DMG (Apple Silicon)** — `ShackBench-<version>-macos-arm64.dmg`
 
 Or build from source — see [Build](#build) below.
 
@@ -99,7 +99,7 @@ colour-coded stream log underneath gives the timeline.
 
 Record the live stream to a capture file, and replay any capture back
 as a **local TCI server** so another client (WSJT-X, a logger, a second
-TCI Monitor) can connect to it offline — no radio involved.
+Shack-Bench) can connect to it offline — no radio involved.
 
 - **Record** writes a `.tcicap` file (format below).
 - **Replay** stands up a `QWebSocketServer` and feeds the file with its
@@ -138,7 +138,7 @@ the slice's operating mode.
 Every saved CSV carries:
 
 - run timestamp
-- TCI Monitor build identity (git hash, branch, dirty flag, commit
+- Shack-Bench build identity (git hash, branch, dirty flag, commit
   date, compile date, host OS — baked at CMake configure time)
 - AetherSDR server identity (`device:` / `protocol:` / `software:`)
 - a **WARNING** block if forward power stayed at 0 W across the whole
@@ -195,6 +195,6 @@ particular logger or controller it might inform.
 
 ## License
 
-MIT.  See [LICENSE](LICENSE).
+GPL-3.0-or-later.  See [LICENSE](LICENSE).
 
 73 de G0JKN / W3.

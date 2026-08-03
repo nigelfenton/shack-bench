@@ -1,16 +1,16 @@
-; Inno Setup script for TCI Monitor Windows installer.
+; Inno Setup script for Shack-Bench Windows installer.
 ;
 ; Built by GitHub Actions on tag push (see .github/workflows/release.yml).
 ; Locally:
 ;   set TCIMON_VERSION=0.1.0
-;   set TCIMON_STAGING=C:\path\to\TciMonitor-v0.1.0-windows-x64
+;   set TCIMON_STAGING=C:\path\to\ShackBench-v0.1.0-windows-x64
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\tcimonitor.iss
 
-#define MyAppName        "TCI Monitor"
+#define MyAppName        "Shack-Bench"
 #define MyAppVersion     GetEnv("TCIMON_VERSION")
 #define MyAppPublisher   "Nigel Fenton (G0JKN / W3)"
-#define MyAppURL         "https://github.com/nigelfenton/tci-monitor"
-#define MyAppExeName     "TciMonitor.exe"
+#define MyAppURL         "https://github.com/nigelfenton/shack-bench"
+#define MyAppExeName     "ShackBench.exe"
 #define StagingDir       GetEnv("TCIMON_STAGING")
 
 #if MyAppVersion == ""
@@ -29,12 +29,12 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={autopf}\TciMonitor
-DefaultGroupName=TCI Monitor
+DefaultDirName={autopf}\ShackBench
+DefaultGroupName=Shack-Bench
 AllowNoIcons=yes
 LicenseFile={#StagingDir}\LICENSE
 OutputDir=installer-output
-OutputBaseFilename=TciMonitor-Setup-{#MyAppVersion}-windows-x64
+OutputBaseFilename=ShackBench-Setup-{#MyAppVersion}-windows-x64
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

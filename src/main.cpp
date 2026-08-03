@@ -1,10 +1,11 @@
-// TCI Monitor — entry point.
+// Shack-Bench — entry point.
 // Sets up the QApplication, applies the dark stylesheet, opens the main
 // monitor window.
 
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QSettings>
 
 namespace {
 
@@ -59,10 +60,32 @@ int main(int argc, char* argv[])
 {
     QApplication::setOrganizationName("G0JKN");
     QApplication::setOrganizationDomain("g0jkn.uk");
-    QApplication::setApplicationName("TCI Monitor");
+    QApplication::setApplicationName("Shack-Bench");
     QApplication::setApplicationVersion("0.4.0");
 
     QApplication app(argc, argv);
+
+    // The app was called "TCI Monitor" until 2026-08-03, and QSettings keys
+    // off the application name — so a rename silently orphans every stored
+    // setting (window layout, TX-cal parameters, suppressed message types).
+    // Carry them across once, on first run under the new name, rather than
+    // making the rename cost the user their configuration.
+    {
+        QSettings fresh;
+        if (fresh.allKeys().isEmpty()) {
+            // Match the platform default (registry on Windows, INI elsewhere)
+            // rather than forcing IniFormat, which would look in the wrong
+            // store and silently find nothing.
+            QSettings old("G0JKN", "TCI Monitor");
+            const QStringList keys = old.allKeys();
+            if (!keys.isEmpty()) {
+                for (const QString& k : keys) fresh.setValue(k, old.value(k));
+                fresh.sync();
+                qInfo("migrated %lld settings from the former \"TCI Monitor\" "
+                      "identity", static_cast<long long>(keys.size()));
+            }
+        }
+    }
     app.setStyleSheet(kAppStylesheet);
 
     TciMon::MainWindow w;

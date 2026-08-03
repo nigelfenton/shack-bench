@@ -7,7 +7,7 @@
 //   • forward power (W) — right axis, cyan
 // The knee (highest clean tx_gain) and the recommended setting are marked.
 //
-// No Qt Charts dependency — TCI Monitor stays lean, same as SwrPlot.
+// No Qt Charts dependency — Shack-Bench stays lean, same as SwrPlot.
 
 #include <QWidget>
 #include <QVector>

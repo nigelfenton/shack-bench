@@ -11,7 +11,7 @@
 //   Antenna  — SWR (1.0 at the BOTTOM), R and X in ohms, return loss in dB
 //   Spectrum — amplitude in dBm
 //
-// No Qt Charts dependency; TCI Monitor stays lean. Same palette as SwrPlot.
+// No Qt Charts dependency; Shack-Bench stays lean. Same palette as SwrPlot.
 
 #include <QWidget>
 #include <QMap>

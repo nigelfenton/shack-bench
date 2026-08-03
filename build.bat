@@ -1,5 +1,5 @@
 @echo off
-REM TCI Monitor build script — vcvars64 + configure (first time) + build.
+REM Shack-Bench build script — vcvars64 + configure (first time) + build.
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 set PATH=%PATH%;C:\Program Files\CMake\bin;C:\Users\nigel\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\Program Files\LLVM\bin

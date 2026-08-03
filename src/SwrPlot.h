@@ -2,7 +2,7 @@
 
 // SwrPlot — a tiny custom-painted SWR-vs-frequency graph.
 //
-// No Qt Charts dependency (TCI Monitor stays lean). Draws one or more
+// No Qt Charts dependency (Shack-Bench stays lean). Draws one or more
 // captured sweeps as overlaid polylines with an SWR grid, frequency
 // axis, per-curve min-SWR marker, and a legend.
 

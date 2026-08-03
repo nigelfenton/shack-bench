@@ -301,7 +301,7 @@ void ReplayPanel::onStartServer()
         }
     }
 
-    m_server = new QWebSocketServer(QStringLiteral("TCI Monitor Replay"),
+    m_server = new QWebSocketServer(QStringLiteral("Shack-Bench Replay"),
                                     QWebSocketServer::NonSecureMode, this);
     // Loopback-only unless the user explicitly opts into LAN exposure —
     // a replay server should not be reachable across the network by

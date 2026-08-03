@@ -101,7 +101,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       m_tci(new TciClient(this))
 {
-    setWindowTitle("TCI Monitor");
+    setWindowTitle("Shack-Bench");
     resize(1200, 720);
 
     buildUI();
@@ -879,10 +879,10 @@ void MainWindow::onClearLog()
 void MainWindow::onSaveLog()
 {
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
-    const QString defaultName = QString("tci-monitor-%1.log").arg(stamp);
+    const QString defaultName = QString("shack-bench-%1.log").arg(stamp);
     // Open the dialog in the directory used for the last successful save,
     // falling back to Documents the first time (key shared via the app's
-    // G0JKN / "TCI Monitor" QSettings, same as DiscoveryDialog).
+    // G0JKN / "Shack-Bench" QSettings, same as DiscoveryDialog).
     QSettings settings;
     const QString fallbackDir =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -913,7 +913,7 @@ void MainWindow::onSaveSweep()
     if (m_sweepsByBand.isEmpty()) {
         QMessageBox::information(this, "No sweep",
             "No completed SWR sweep captured yet. Run an antenna SWR sweep "
-            "in AetherSDR with TCI Monitor connected, then try again.");
+            "in AetherSDR with Shack-Bench connected, then try again.");
         return;
     }
     // Export the band(s) currently ticked on the SWR tab.
@@ -959,7 +959,7 @@ void MainWindow::onSaveSweep()
         return;
     }
     QTextStream out(&f);
-    out << "# TCI Monitor SWR sweep\n";
+    out << "# Shack-Bench SWR sweep\n";
     int total = 0;
     for (const QString& band : bands) {
         const auto& m = m_sweepsByBand.value(band);
@@ -1173,7 +1173,7 @@ void MainWindow::refreshSuppressionUi()
     m_clearSuppressBtn->setEnabled(n > 0);
 
     // Persist so the same filters re-apply on next launch (shared G0JKN /
-    // "TCI Monitor" QSettings).
+    // "Shack-Bench" QSettings).
     QSettings settings;
     settings.setValue("log/suppressed",
         QStringList(m_suppressed.begin(), m_suppressed.end()));

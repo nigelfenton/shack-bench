@@ -239,9 +239,9 @@ void CalibrationPanel::buildUI()
             auto orUnknown = [](const QString& s) {
                 return s.isEmpty() ? QStringLiteral("(unknown)") : s;
             };
-            out << "# TCI Monitor TX-drive calibration\n";
+            out << "# Shack-Bench TX-drive calibration\n";
             out << "# run started:      " << m_runStarted << "\n";
-            out << "# TCI Monitor:      commit " << TciMon::kBuildGitHash
+            out << "# Shack-Bench:      commit " << TciMon::kBuildGitHash
                 << " on " << TciMon::kBuildGitBranch
                 << " (dirty=" << TciMon::kBuildGitDirty << ")"
                 << ", committed " << TciMon::kBuildGitDate
@@ -563,7 +563,7 @@ void CalibrationPanel::beginKeydown()
     // the modulator must come from elsewhere: the slice's DAX RX button on
     // (macOS HostedDaxBridge asserts transmit dax=1 per key), or the slice
     // in a digital mode. We do NOT pass ",tci" here because TciServer's tci
-    // path enables TX_CHRONO timing — which TCI Monitor doesn't yet honor —
+    // path enables TX_CHRONO timing — which Shack-Bench doesn't yet honor —
     // and the resulting chrono stalls make ~half the keys fail to actually
     // transmit. Re-enable ",tci" once the panel speaks TX_CHRONO properly.
     if (m_tci) m_tci->send("trx:0,true;");

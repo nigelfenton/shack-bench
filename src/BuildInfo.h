@@ -1,6 +1,6 @@
 #pragma once
 
-// Compile-time identification of this TCI Monitor binary. Populated by CMake
+// Compile-time identification of this Shack-Bench binary. Populated by CMake
 // from the git working tree at configure time, plus the compiler's __DATE__
 // and __TIME__ at the moment BuildInfo.cpp itself was compiled.
 //

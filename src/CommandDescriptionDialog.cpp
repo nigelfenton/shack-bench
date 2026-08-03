@@ -58,7 +58,7 @@ CommandDescriptionDialog::CommandDescriptionDialog(const TciCommand* cmd,
         auto* msg = new QLabel(
             QString("No description on file for <b>%1</b>.<br><br>"
                     "If you know what this command does, please raise an "
-                    "issue on the TCI Monitor repo with the syntax and "
+                    "issue on the Shack-Bench repo with the syntax and "
                     "a short description.")
                 .arg(cmdName.toHtmlEscaped()));
         msg->setWordWrap(true);

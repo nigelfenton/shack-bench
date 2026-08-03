@@ -11,7 +11,7 @@ namespace TciMon {
 
 namespace {
 
-// Palette — neon-on-dark, picked to keep the existing TCI Monitor mood
+// Palette — neon-on-dark, picked to keep the existing Shack-Bench mood
 // (deep navy bg, amber+cyan accents) but with the saturation and glow
 // turned up so the curves carry across the room.
 constexpr const char* kBgTop      = "#02060e";   // very dark navy at top
