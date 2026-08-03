@@ -25,6 +25,7 @@
 #include <QString>
 
 #include "CoaxAnalysis.h"
+#include "Scope.h"
 #include "Instrument.h"
 
 class QComboBox;
@@ -69,11 +70,15 @@ private slots:
     void onTakeShortClicked();
     void onCableTypeChanged(int index);
     void onAnalyseCoax();
+    void onScopeCapture();
+    void onScopeFinished(const TciMon::ScopeCapture& cap);
+    void onScopeProgress(const QString& note);
 
 private:
     void buildAntennaTab();
     void buildSpectrumTab();
     void buildFeedlineTab();
+    void buildScopeTab();
     void log(const QString& line);
     void refreshPlots();
     void setBusy(bool busy);
@@ -120,6 +125,15 @@ private:
     SweepResult     m_shortSweep;
     bool            m_capturingOpen = false;   // which button armed the sweep
     bool            m_capturingShort = false;
+
+    // --- scope tab (Hantek DSO2D15 over USBTMC) ---
+    QPushButton*    m_scopeCapture = nullptr;
+    QLabel*         m_scopeStatus = nullptr;
+    QPlainTextEdit* m_scopeReport = nullptr;
+    TracePlot*      m_plotScope = nullptr;
+    QThread*        m_scopeThread = nullptr;
+    ScopeWorker*    m_scopeWorker = nullptr;
+    QString         m_scopeResource;
 
     // --- shared ---
     QListWidget*    m_library = nullptr;

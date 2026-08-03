@@ -97,6 +97,7 @@ set(TCIMON_SOURCES
     src/TracePlot.cpp
     src/Instrument.cpp
     src/CoaxAnalysis.cpp
+    src/Scope.cpp
     src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
@@ -201,3 +202,17 @@ target_include_directories(coax_analysis_test PRIVATE src)
 target_link_libraries(coax_analysis_test PRIVATE Qt6::Core Qt6::SerialPort)
 set_target_properties(coax_analysis_test PROPERTIES AUTOMOC ON)
 add_test(NAME coax_analysis_test COMMAND coax_analysis_test)
+
+# ── Scope decode test ─────────────────────────────────────────────────────
+# Pure maths, no instrument: the DSO2D15 channel de-interleave, the 25-counts-
+# per-division volts conversion, and the measurements the firmware refuses to
+# report (it implements no :MEASure: value queries at all).
+add_executable(scope_decode_test
+    tests/scope_decode_test.cpp
+    src/Scope.cpp
+)
+target_include_directories(scope_decode_test PRIVATE src)
+target_link_libraries(scope_decode_test PRIVATE Qt6::Core)
+set_target_properties(scope_decode_test PROPERTIES AUTOMOC ON)
+add_test(NAME scope_decode_test COMMAND scope_decode_test)
+

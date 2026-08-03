@@ -27,6 +27,7 @@ TracePlot::TracePlot(QWidget* parent) : QWidget(parent)
 }
 
 void TracePlot::setUnit(Unit u)                     { m_unit = u; update(); }
+void TracePlot::setXAxis(XAxis a)                   { m_xAxis = a; update(); }
 void TracePlot::setTitle(const QString& t)          { m_title = t; update(); }
 void TracePlot::setProvenance(const QString& t)     { m_provenance = t; update(); }
 void TracePlot::setPlaceholder(const QString& t)    { m_placeholder = t; update(); }
@@ -91,6 +92,19 @@ TracePlot::Axis TracePlot::yAxis() const
         for (double v = bot; v <= top + 1e-9; v += (top - bot) / 5.0) ticks << v;
         return {bot, top, ticks};
     }
+    case Unit::Volts: {
+        double m = std::max(std::abs(lo), std::abs(hi));
+        if (m < 1e-6) m = 1.0;
+        // Round up to a sensible 1/2/5 step so the grid reads cleanly.
+        const double mag = std::pow(10.0, std::floor(std::log10(m)));
+        const double norm = m / mag;
+        const double nice = (norm <= 1.0 ? 1.0 : norm <= 2.0 ? 2.0
+                                                             : norm <= 5.0 ? 5.0 : 10.0);
+        m = nice * mag;
+        QVector<double> ticks;
+        for (int k = -4; k <= 4; ++k) ticks << m * k / 4.0;
+        return {-m, m, ticks};
+    }
     case Unit::Dbm:
     default: {
         double top = std::ceil((hi + 5) / 10.0) * 10.0;
@@ -110,6 +124,10 @@ QString TracePlot::formatValue(double v) const
     case Unit::Ohms: return QString::number(v, 'f', 1);
     case Unit::Db:   return QString::number(v, 'f', 1);
     case Unit::Dbm:  return QString::number(v, 'f', 1);
+    case Unit::Volts:
+        if (std::abs(v) >= 1.0)  return QString::number(v, 'f', 2);
+        if (std::abs(v) >= 1e-3) return QString::number(v * 1e3, 'f', 0) + "m";
+        return QString::number(v * 1e6, 'f', 0) + "u";
     }
     return QString::number(v);
 }
@@ -256,10 +274,19 @@ void TracePlot::paintEvent(QPaintEvent*)
         p.setPen(kGrid);
         p.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
         p.setPen(kLabel);
-        const double mhz = hz / 1e6;
-        p.drawText(QRectF(x - 44, area.bottom() + 4, 88, 14),
-                   Qt::AlignHCenter | Qt::AlignTop,
-                   QString::number(mhz, 'f', mhz < 100 ? 3 : 1));
+        QString tick;
+        if (m_xAxis == XAxis::TimeMicros) {
+            // Keys are microseconds. Pick a unit that keeps the label short.
+            const double us = double(hz);
+            if (std::abs(us) >= 1000.0)   tick = QString::number(us / 1000.0, 'f', 2) + " ms";
+            else if (std::abs(us) >= 1.0) tick = QString::number(us, 'f', 1) + " us";
+            else                          tick = QString::number(us * 1000.0, 'f', 0) + " ns";
+        } else {
+            const double mhz = hz / 1e6;
+            tick = QString::number(mhz, 'f', mhz < 100 ? 3 : 1);
+        }
+        p.drawText(QRectF(x - 48, area.bottom() + 4, 96, 14),
+                   Qt::AlignHCenter | Qt::AlignTop, tick);
     }
 
     p.setPen(kFrame);
@@ -315,7 +342,14 @@ void TracePlot::paintEvent(QPaintEvent*)
         p.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
 
         QStringList rows;
-        rows << QString("%1 MHz").arg(m_cursorHz / 1e6, 0, 'f', 4);
+        if (m_xAxis == XAxis::TimeMicros) {
+            const double us = double(m_cursorHz);
+            rows << (std::abs(us) >= 1000.0
+                         ? QString("%1 ms").arg(us / 1000.0, 0, 'f', 3)
+                         : QString("%1 us").arg(us, 0, 'f', 2));
+        } else {
+            rows << QString("%1 MHz").arg(m_cursorHz / 1e6, 0, 'f', 4);
+        }
         for (const auto& t : traces) {
             auto it = t.points.lowerBound(m_cursorHz);
             if (it == t.points.end() && !t.points.isEmpty()) --it;

@@ -27,7 +27,12 @@ public:
     // What the Y axis means. Governs scaling, tick choice and formatting --
     // and, for Swr, the rule that 1:1 sits at the BOTTOM so a dip reads as a
     // dip. Inverting an SWR axis reverses its meaning; do not.
-    enum class Unit { Swr, Ohms, Db, Dbm };
+    enum class Unit { Swr, Ohms, Db, Dbm, Volts };
+
+    // The X axis is frequency for every instrument except the scope, which is
+    // time. This only changes tick formatting and the axis caption; the data
+    // is still keyed by a qint64 (microseconds instead of Hz).
+    enum class XAxis { FrequencyHz, TimeMicros };
 
     struct Trace {
         QString             label;       // "40m live" / "baseline 2026-08-02"
@@ -56,6 +61,7 @@ public:
     explicit TracePlot(QWidget* parent = nullptr);
 
     void setUnit(Unit u);
+    void setXAxis(XAxis a);
     void setTitle(const QString& title);        // headline, drawn top-left
     void setProvenance(const QString& text);    // small strip along the bottom
     void setPlaceholder(const QString& text);   // shown when there is no data
@@ -93,6 +99,7 @@ private:
     QString formatValue(double v) const;
 
     Unit            m_unit = Unit::Swr;
+    XAxis           m_xAxis = XAxis::FrequencyHz;
     QString         m_title;
     QString         m_provenance;
     QString         m_placeholder = "No sweep captured yet.";

@@ -103,6 +103,7 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
     buildAntennaTab();
     buildFeedlineTab();
     buildSpectrumTab();
+    buildScopeTab();
     root->addWidget(m_tabs, 1);
 
     m_log = new QPlainTextEdit();
@@ -129,6 +130,10 @@ InstrumentPanel::~InstrumentPanel()
     if (m_thread) {
         m_thread->quit();
         m_thread->wait(3000);
+    }
+    if (m_scopeThread) {
+        m_scopeThread->quit();
+        m_scopeThread->wait(3000);
     }
 }
 
@@ -411,6 +416,152 @@ void InstrumentPanel::onAnalyseCoax()
             .arg(r.assumedVf, 0, 'f', 3)
             .arg(r.meanZ0, 0, 'f', 1)
             .arg(r.verdict));
+}
+
+void InstrumentPanel::buildScopeTab()
+{
+    auto* page = new QWidget();
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(6, 6, 6, 6);
+
+    auto* ctl = new QHBoxLayout();
+    m_scopeCapture = new QPushButton("Capture");
+    connect(m_scopeCapture, &QPushButton::clicked,
+            this, &InstrumentPanel::onScopeCapture);
+    ctl->addWidget(m_scopeCapture);
+    m_scopeStatus = new QLabel("checking for a scope…");
+    m_scopeStatus->setWordWrap(true);
+    m_scopeStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
+    ctl->addWidget(m_scopeStatus, 1);
+    v->addLayout(ctl);
+
+    m_plotScope = new TracePlot();
+    m_plotScope->setUnit(TracePlot::Unit::Volts);
+    m_plotScope->setXAxis(TracePlot::XAxis::TimeMicros);
+    m_plotScope->setTitle("Waveform");
+    m_plotScope->setPlaceholder("No capture yet — press Capture.");
+    connect(m_plotScope, &TracePlot::cursorMoved,
+            this, &InstrumentPanel::onCursorMoved);
+    v->addWidget(m_plotScope, 1);
+
+    m_scopeReport = new QPlainTextEdit();
+    m_scopeReport->setReadOnly(true);
+    m_scopeReport->setMaximumHeight(150);
+    m_scopeReport->setStyleSheet(
+        "background:#050a14; color:#cfe3ff; font-family:Consolas;");
+    v->addWidget(m_scopeReport);
+
+    m_tabs->addTab(page, "Scope");
+
+    // Availability is a startup fact, so resolve it once here rather than
+    // failing at the first Capture.
+    QString detail;
+    if (!scopeVisaAvailable(&detail)) {
+        m_scopeCapture->setEnabled(false);
+        m_scopeStatus->setText("no VISA runtime — " + detail);
+        m_scopeReport->setPlainText(
+            "The scope is driven over USBTMC through a VISA library, which is\n"
+            "not present on this machine. Install NI-VISA or Keysight IO\n"
+            "Libraries and restart. Every other tab works without it.");
+        return;
+    }
+    QString findLog;
+    m_scopeResource = findScopeResource(&findLog);
+    if (m_scopeResource.isEmpty()) {
+        m_scopeCapture->setEnabled(false);
+        m_scopeStatus->setText("no scope found — " + findLog);
+    } else {
+        m_scopeStatus->setText(m_scopeResource);
+    }
+
+    m_scopeThread = new QThread(this);
+    m_scopeWorker = new ScopeWorker();
+    m_scopeWorker->moveToThread(m_scopeThread);
+    connect(m_scopeThread, &QThread::finished, m_scopeWorker,
+            &QObject::deleteLater);
+    connect(m_scopeWorker, &ScopeWorker::finished,
+            this, &InstrumentPanel::onScopeFinished);
+    connect(m_scopeWorker, &ScopeWorker::progress,
+            this, &InstrumentPanel::onScopeProgress);
+    m_scopeThread->start();
+}
+
+void InstrumentPanel::onScopeProgress(const QString& note)
+{
+    m_scopeStatus->setText(note);
+}
+
+void InstrumentPanel::onScopeCapture()
+{
+    if (m_scopeResource.isEmpty() || !m_scopeWorker) return;
+    m_scopeCapture->setEnabled(false);
+    log("scope: capturing…");
+    QMetaObject::invokeMethod(m_scopeWorker, "capture", Qt::QueuedConnection,
+                              Q_ARG(QString, m_scopeResource));
+}
+
+void InstrumentPanel::onScopeFinished(const TciMon::ScopeCapture& cap)
+{
+    m_scopeCapture->setEnabled(true);
+
+    if (!cap.ok) {
+        m_scopeStatus->setText("capture failed");
+        m_scopeReport->setPlainText("CAPTURE FAILED\n  " + cap.error);
+        log("scope: " + cap.error);
+        return;
+    }
+
+    QVector<TracePlot::Trace> traces;
+    const QColor colours[2] = {QColor("#ffd866"), QColor("#4fc3f7")};
+    const double sps = cap.secondsPerSample();
+    for (const auto& ch : cap.channels) {
+        if (!ch.enabled || ch.volts.isEmpty()) continue;
+        TracePlot::Trace t;
+        t.label = QString("CH%1").arg(ch.index);
+        t.color = colours[(ch.index - 1) % 2];
+        for (int i = 0; i < ch.volts.size(); ++i)
+            t.points.insert(qint64(i * sps * 1e6), ch.volts[i]);  // microseconds
+        traces << t;
+    }
+    m_plotScope->setTraces(traces);
+    m_plotScope->setTitle(QString("Waveform — %1 s/div, %2 Sa/s")
+                              .arg(cap.secondsPerDiv, 0, 'g', 3)
+                              .arg(cap.sampleRateHz, 0, 'f', 0));
+    m_plotScope->setProvenance(
+        QString("%1 · trigger %2/%3 · %4")
+            .arg(cap.idn.section(',', 1, 1).trimmed(), cap.triggerMode,
+                 cap.triggerSweep, cap.takenAtIso));
+
+    QStringList t;
+    t << QString("%1   %2 s/div   %3 Sa/s   %4 points")
+             .arg(cap.idn.section(',', 1, 1).trimmed())
+             .arg(cap.secondsPerDiv, 0, 'g', 3)
+             .arg(cap.sampleRateHz, 0, 'f', 0)
+             .arg(cap.pointsRequested);
+    t << "";
+    t << "  ch  V/div   coupling   Vpp      Vrms     Vmean    freq";
+    for (const auto& ch : cap.channels) {
+        if (!ch.enabled) { t << QString("  %1  (off)").arg(ch.index); continue; }
+        t << QString("  %1   %2   %3   %4  %5  %6  %7")
+                 .arg(ch.index)
+                 .arg(ch.voltsPerDiv, 6, 'g', 3)
+                 .arg(ch.coupling, -8)
+                 .arg(ch.vpp, 7, 'f', 3)
+                 .arg(ch.vrms, 8, 'f', 3)
+                 .arg(ch.vmean, 8, 'f', 3)
+                 .arg(ch.freqHz > 0
+                          ? QString("%1 Hz").arg(ch.freqHz, 0, 'f', 1)
+                          : QString("—"));
+    }
+    t << "";
+    t << "  ⚠ Vpp/Vrms/frequency are COMPUTED from the captured samples.";
+    t << "    Firmware 3.0.1 implements no :MEASure: value queries at all, so";
+    t << "    these are our numbers, not the instrument's readout.";
+    t << "    A flat trace reports no frequency rather than inventing one.";
+    m_scopeReport->setPlainText(t.join('\n'));
+
+    m_scopeStatus->setText(QString("captured %1").arg(cap.takenAtIso));
+    log(QString("scope: captured %1 channel(s)").arg(traces.size()));
 }
 
 void InstrumentPanel::buildSpectrumTab()
