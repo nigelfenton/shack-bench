@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "CalibrationPanel.h"
+#include "InstrumentPanel.h"
 #include "CommandDescriptionDialog.h"
 #include "CommandsReferenceDialog.h"
 #include "ComparePanel.h"
@@ -394,6 +395,9 @@ void MainWindow::buildUI()
     m_cal = new CalibrationPanel(m_tci);
     m_topTabs->addTab(m_cal, "TX Cal");
 
+    m_instruments = new InstrumentPanel(m_tci);
+    m_topTabs->addTab(m_instruments, "Instruments");
+
     main->addWidget(m_topTabs, 1);
 
     // ── Status bar counters ────────────────────────────────────────────
@@ -469,6 +473,7 @@ void MainWindow::onRawMessage(const QString& line)
     if (m_console)   m_console->noteIncoming(line);
     if (m_replay)    m_replay->noteIncoming(line);
     if (m_cal)       m_cal->noteIncoming(line);
+    if (m_instruments) m_instruments->noteIncoming(line);
 
     refreshStatus();
 }

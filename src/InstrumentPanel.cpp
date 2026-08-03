@@ -1,0 +1,657 @@
+#include "InstrumentPanel.h"
+
+#include "TciClient.h"
+#include "TracePlot.h"
+
+#include <QComboBox>
+#include <QDateTime>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QInputDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QSplitter>
+#include <QTabWidget>
+#include <QTextStream>
+#include <QThread>
+#include <QVBoxLayout>
+#include <cmath>
+
+namespace TciMon {
+
+namespace {
+
+struct BandPreset { const char* name; double fromMhz; double toMhz; };
+
+// HF ham bands, plus a wide "all HF" scan. The trapped-vertical case the
+// design sheet is built around wants one dip per band.
+const BandPreset kBands[] = {
+    {"All HF 2-30",  2.000,  30.000},
+    {"160m",         1.800,   2.000},
+    {"80m",          3.500,   4.000},
+    {"60m",          5.330,   5.410},
+    {"40m",          7.000,   7.300},
+    {"30m",         10.100,  10.150},
+    {"20m",         14.000,  14.350},
+    {"17m",         18.068,  18.168},
+    {"15m",         21.000,  21.450},
+    {"12m",         24.890,  24.990},
+    {"10m",         28.000,  29.700},
+    {"6m",          50.000,  54.000},
+};
+
+struct SpanPreset { const char* name; double fromMhz; double toMhz; };
+// The unit here is the ORIGINAL tinySA: usable 0.1-350 MHz. Anything above is
+// clamped silently by the instrument, so do not offer spans it cannot honour.
+const SpanPreset kSpans[] = {
+    {"HF 0.1-30",      0.100,   30.000},
+    {"Full 0.1-350",   0.100,  350.000},
+    {"6m 50-54",      50.000,   54.000},
+    {"FM 88-108",     88.000,  108.000},
+    {"2m 144-148",   144.000,  148.000},
+    {"70cm 430-440", 430.000,  440.000},
+};
+
+const QColor kLive   ("#4fc3f7");
+const QColor kRefer  ("#ffb454");
+const QColor kR      ("#7ee787");
+const QColor kX      ("#ff7b72");
+const QColor kAe     ("#d2a8ff");
+
+QVector<TracePlot::Span> hamBandSpans()
+{
+    QVector<TracePlot::Span> out;
+    for (const auto& b : kBands) {
+        if (QString(b.name).startsWith("All")) continue;
+        TracePlot::Span s;
+        s.fromHz = qint64(b.fromMhz * 1e6);
+        s.toHz   = qint64(b.toMhz   * 1e6);
+        s.color  = QColor(80, 140, 255, 22);
+        s.label  = b.name;
+        out << s;
+    }
+    return out;
+}
+
+} // namespace
+
+InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
+    : QWidget(parent), m_tci(tci)
+{
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(8, 8, 8, 8);
+    root->setSpacing(6);
+
+    // Top strip: instrument discovery, shared by both tabs.
+    auto* top = new QHBoxLayout();
+    auto* probe = new QPushButton("Probe instruments");
+    connect(probe, &QPushButton::clicked, this, &InstrumentPanel::onProbeClicked);
+    top->addWidget(probe);
+    m_cursorLabel = new QLabel("—");
+    m_cursorLabel->setStyleSheet("color:#8fb8ff; font-family:Consolas;");
+    top->addWidget(m_cursorLabel, 1);
+    root->addLayout(top);
+
+    m_tabs = new QTabWidget();
+    buildAntennaTab();
+    buildSpectrumTab();
+    root->addWidget(m_tabs, 1);
+
+    m_log = new QPlainTextEdit();
+    m_log->setReadOnly(true);
+    m_log->setMaximumHeight(110);
+    m_log->setStyleSheet("background:#050a14; color:#9fb4cc; font-family:Consolas;");
+    root->addWidget(m_log);
+
+    m_thread = new QThread(this);
+    m_worker = new SweepWorker();
+    m_worker->moveToThread(m_thread);
+    connect(m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
+    connect(m_worker, &SweepWorker::progress, this, &InstrumentPanel::onSweepProgress);
+    connect(m_worker, &SweepWorker::finished, this, &InstrumentPanel::onSweepFinished);
+    m_thread->start();
+
+    log("Bench instruments. Press \"Probe instruments\" to see what is attached.");
+    log("Sweeps are refused while AetherSDR reports TX — an analyser on a live "
+        "feedline is a destroyed analyser.");
+}
+
+InstrumentPanel::~InstrumentPanel()
+{
+    if (m_thread) {
+        m_thread->quit();
+        m_thread->wait(3000);
+    }
+}
+
+void InstrumentPanel::buildAntennaTab()
+{
+    auto* page = new QWidget();
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(6, 6, 6, 6);
+
+    auto* ctl = new QHBoxLayout();
+    ctl->addWidget(new QLabel("Instrument:"));
+    m_antInstrument = new QComboBox();
+    m_antInstrument->addItem("(probe first)");
+    ctl->addWidget(m_antInstrument);
+
+    ctl->addWidget(new QLabel("Band:"));
+    m_antBandPreset = new QComboBox();
+    for (const auto& b : kBands) m_antBandPreset->addItem(b.name);
+    m_antBandPreset->setCurrentIndex(4);      // 40m
+    connect(m_antBandPreset, &QComboBox::currentIndexChanged,
+            this, &InstrumentPanel::onBandPresetChanged);
+    ctl->addWidget(m_antBandPreset);
+
+    m_antFrom = new QDoubleSpinBox();
+    m_antFrom->setRange(0.1, 170.0); m_antFrom->setDecimals(3);
+    m_antFrom->setSuffix(" MHz"); m_antFrom->setValue(7.000);
+    m_antTo = new QDoubleSpinBox();
+    m_antTo->setRange(0.1, 170.0); m_antTo->setDecimals(3);
+    m_antTo->setSuffix(" MHz"); m_antTo->setValue(7.300);
+    ctl->addWidget(m_antFrom);
+    ctl->addWidget(new QLabel("to"));
+    ctl->addWidget(m_antTo);
+
+    ctl->addWidget(new QLabel("Points:"));
+    m_antPoints = new QSpinBox();
+    m_antPoints->setRange(5, 500); m_antPoints->setValue(100);
+    ctl->addWidget(m_antPoints);
+
+    m_antSweep = new QPushButton("Sweep");
+    connect(m_antSweep, &QPushButton::clicked, this, &InstrumentPanel::onSweepClicked);
+    ctl->addWidget(m_antSweep);
+    m_antStop = new QPushButton("Stop");
+    m_antStop->setEnabled(false);
+    connect(m_antStop, &QPushButton::clicked, this, &InstrumentPanel::onStopClicked);
+    ctl->addWidget(m_antStop);
+    ctl->addStretch();
+    v->addLayout(ctl);
+
+    // Provenance row — guardrail 2. Nothing is stored without it.
+    auto* prov = new QHBoxLayout();
+    prov->addWidget(new QLabel("What is connected?"));
+    m_antNote = new QLineEdit();
+    m_antNote->setPlaceholderText(
+        "e.g. Hustler 5-BTV at the feedpoint, 30 m RG-213, ATU bypassed");
+    prov->addWidget(m_antNote, 1);
+    m_antCalBadge = new QLabel("cal: unknown");
+    m_antCalBadge->setStyleSheet("color:#ffb454; font-family:Consolas;");
+    prov->addWidget(m_antCalBadge);
+    v->addLayout(prov);
+
+    m_plotSwr = new TracePlot();
+    m_plotSwr->setUnit(TracePlot::Unit::Swr);
+    m_plotSwr->setTitle("SWR");
+    m_plotSwr->setPlaceholder("No sweep yet — pick a band and press Sweep.");
+    m_plotSwr->setSpans(hamBandSpans());
+    connect(m_plotSwr, &TracePlot::cursorMoved, this, &InstrumentPanel::onCursorMoved);
+
+    m_plotRx = new TracePlot();
+    m_plotRx->setUnit(TracePlot::Unit::Ohms);
+    m_plotRx->setTitle("R and X (ohms) — the diagnostic pair");
+    m_plotRx->setPlaceholder("R/X appear here. A disconnected feed is visible "
+                             "ONLY in X (a constant series capacitance).");
+    connect(m_plotRx, &TracePlot::cursorMoved, this, &InstrumentPanel::onCursorMoved);
+
+    m_plotRl = new TracePlot();
+    m_plotRl->setUnit(TracePlot::Unit::Db);
+    m_plotRl->setTitle("Return loss (dB)");
+    m_plotRl->setPlaceholder("Return loss appears here.");
+    connect(m_plotRl, &TracePlot::cursorMoved, this, &InstrumentPanel::onCursorMoved);
+
+    auto* split = new QSplitter(Qt::Vertical);
+    split->addWidget(m_plotSwr);
+    split->addWidget(m_plotRx);
+    split->addWidget(m_plotRl);
+    split->setStretchFactor(0, 3);
+    split->setStretchFactor(1, 2);
+    split->setStretchFactor(2, 2);
+    v->addWidget(split, 1);
+
+    auto* bottom = new QHBoxLayout();
+    m_antStatus = new QLabel("idle");
+    m_antStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
+    bottom->addWidget(m_antStatus, 1);
+    auto* save = new QPushButton("Save to library");
+    connect(save, &QPushButton::clicked, this, &InstrumentPanel::onSaveClicked);
+    bottom->addWidget(save);
+    auto* recall = new QPushButton("Recall / overlay");
+    connect(recall, &QPushButton::clicked, this, &InstrumentPanel::onRecallClicked);
+    bottom->addWidget(recall);
+    auto* csv = new QPushButton("Export CSV");
+    connect(csv, &QPushButton::clicked, this, &InstrumentPanel::onExportCsvClicked);
+    bottom->addWidget(csv);
+    v->addLayout(bottom);
+
+    m_library = new QListWidget();
+    m_library->setMaximumHeight(78);
+    m_library->setStyleSheet("background:#050a14; color:#9fb4cc; font-family:Consolas;");
+    v->addWidget(m_library);
+
+    m_tabs->addTab(page, "Antenna");
+}
+
+void InstrumentPanel::buildSpectrumTab()
+{
+    auto* page = new QWidget();
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(6, 6, 6, 6);
+
+    auto* ctl = new QHBoxLayout();
+    ctl->addWidget(new QLabel("Span:"));
+    m_spanPreset = new QComboBox();
+    for (const auto& s : kSpans) m_spanPreset->addItem(s.name);
+    connect(m_spanPreset, &QComboBox::currentIndexChanged, this, [this](int i) {
+        if (i >= 0 && i < int(sizeof(kSpans) / sizeof(kSpans[0]))) {
+            m_saFrom->setValue(kSpans[i].fromMhz);
+            m_saTo->setValue(kSpans[i].toMhz);
+        }
+    });
+    ctl->addWidget(m_spanPreset);
+
+    m_saFrom = new QDoubleSpinBox();
+    m_saFrom->setRange(0.1, 350.0); m_saFrom->setDecimals(3);
+    m_saFrom->setSuffix(" MHz"); m_saFrom->setValue(0.100);
+    m_saTo = new QDoubleSpinBox();
+    m_saTo->setRange(0.1, 350.0); m_saTo->setDecimals(3);
+    m_saTo->setSuffix(" MHz"); m_saTo->setValue(30.000);
+    ctl->addWidget(m_saFrom);
+    ctl->addWidget(new QLabel("to"));
+    ctl->addWidget(m_saTo);
+
+    m_saSweep = new QPushButton("Scan");
+    connect(m_saSweep, &QPushButton::clicked, this, &InstrumentPanel::onSweepClicked);
+    ctl->addWidget(m_saSweep);
+    ctl->addStretch();
+    v->addLayout(ctl);
+
+    m_plotSa = new TracePlot();
+    m_plotSa->setUnit(TracePlot::Unit::Dbm);
+    m_plotSa->setTitle("Spectrum (dBm)");
+    m_plotSa->setPlaceholder("No scan yet — pick a span and press Scan.");
+    m_plotSa->setSpans(hamBandSpans());
+    connect(m_plotSa, &TracePlot::cursorMoved, this, &InstrumentPanel::onCursorMoved);
+    v->addWidget(m_plotSa, 1);
+
+    m_saStatus = new QLabel(
+        "tinySA — this unit is the ORIGINAL (0.1–350 MHz). It CLAMPS a wider "
+        "request silently, so the plot always shows the span it actually accepted.");
+    m_saStatus->setWordWrap(true);
+    m_saStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
+    v->addWidget(m_saStatus);
+
+    m_tabs->addTab(page, "Spectrum");
+}
+
+void InstrumentPanel::onBandPresetChanged(int index)
+{
+    if (index < 0 || index >= int(sizeof(kBands) / sizeof(kBands[0]))) return;
+    m_antFrom->setValue(kBands[index].fromMhz);
+    m_antTo->setValue(kBands[index].toMhz);
+}
+
+void InstrumentPanel::log(const QString& line)
+{
+    m_log->appendPlainText(
+        QDateTime::currentDateTime().toString("HH:mm:ss ") + line);
+}
+
+void InstrumentPanel::onProbeClicked()
+{
+    log("probing serial ports (read-only; no sweep is started)…");
+    QStringList detail;
+    m_found = probeInstruments(&detail);
+    for (const QString& d : detail) log("  " + d);
+
+    m_antInstrument->clear();
+    for (const auto& id : m_found) {
+        if (id.kind == InstrumentId::Kind::RigExpert ||
+            id.kind == InstrumentId::Kind::NanoVna)
+            m_antInstrument->addItem(id.describe(), id.port);
+    }
+    if (m_antInstrument->count() == 0)
+        m_antInstrument->addItem("(no antenna analyser found)");
+
+    log(QString("found %1 instrument(s)").arg(m_found.size()));
+}
+
+bool InstrumentPanel::txInterlockBlocks(QString* why) const
+{
+    if (m_txActive) {
+        if (why) *why = "AetherSDR reports TX is active. Sweeping now would put "
+                        "transmitter power into the analyser's input.";
+        return true;
+    }
+    return false;
+}
+
+void InstrumentPanel::onSweepClicked()
+{
+    QString why;
+    if (txInterlockBlocks(&why)) {
+        QMessageBox::warning(this, "Refused — TX is active", why);
+        log("REFUSED: " + why);
+        return;
+    }
+    if (m_busy) return;
+
+    const bool spectrum = (m_tabs->currentIndex() == 1);
+
+    if (spectrum) {
+        const qint64 a = qint64(m_saFrom->value() * 1e6);
+        const qint64 b = qint64(m_saTo->value() * 1e6);
+        QString port;
+        for (const auto& id : m_found)
+            if (id.kind == InstrumentId::Kind::TinySa) port = id.port;
+        if (port.isEmpty()) {
+            log("no tinySA found — press \"Probe instruments\" first.");
+            return;
+        }
+        setBusy(true);
+        log(QString("tinySA scan %1–%2 MHz on %3")
+                .arg(a / 1e6, 0, 'f', 3).arg(b / 1e6, 0, 'f', 3).arg(port));
+        QMetaObject::invokeMethod(m_worker, "runTinySaSweep", Qt::QueuedConnection,
+                                  Q_ARG(QString, port), Q_ARG(qint64, a),
+                                  Q_ARG(qint64, b), Q_ARG(int, 290));
+        return;
+    }
+
+    const QString port = m_antInstrument->currentData().toString();
+    if (port.isEmpty()) {
+        log("no antenna analyser selected — press \"Probe instruments\" first.");
+        return;
+    }
+    InstrumentId::Kind kind = InstrumentId::Kind::Unknown;
+    for (const auto& id : m_found) if (id.port == port) kind = id.kind;
+
+    const qint64 a = qint64(m_antFrom->value() * 1e6);
+    const qint64 b = qint64(m_antTo->value() * 1e6);
+    if (b <= a) { log("stop frequency must be above start."); return; }
+
+    setBusy(true);
+    if (kind == InstrumentId::Kind::RigExpert) {
+        log(QString("AA-170 sweep %1–%2 MHz, %3 points (this can take minutes)")
+                .arg(a / 1e6, 0, 'f', 3).arg(b / 1e6, 0, 'f', 3)
+                .arg(m_antPoints->value()));
+        QMetaObject::invokeMethod(m_worker, "runRigExpertSweep", Qt::QueuedConnection,
+                                  Q_ARG(QString, port), Q_ARG(qint64, a),
+                                  Q_ARG(qint64, b), Q_ARG(int, m_antPoints->value()));
+    } else {
+        log(QString("NanoVNA sweep %1–%2 MHz, %3 points")
+                .arg(a / 1e6, 0, 'f', 3).arg(b / 1e6, 0, 'f', 3)
+                .arg(m_antPoints->value()));
+        QMetaObject::invokeMethod(m_worker, "runNanoVnaSweep", Qt::QueuedConnection,
+                                  Q_ARG(QString, port), Q_ARG(qint64, a),
+                                  Q_ARG(qint64, b), Q_ARG(int, m_antPoints->value()));
+    }
+}
+
+void InstrumentPanel::onStopClicked()
+{
+    if (m_worker) m_worker->cancel();
+    log("cancel requested — the instrument is left with RF off.");
+}
+
+void InstrumentPanel::setBusy(bool busy)
+{
+    m_busy = busy;
+    m_antSweep->setEnabled(!busy);
+    m_saSweep->setEnabled(!busy);
+    m_antStop->setEnabled(busy);
+}
+
+void InstrumentPanel::onSweepProgress(int done, int total, const QString& note)
+{
+    const QString s = QString("%1  %2/%3").arg(note).arg(done).arg(total);
+    m_antStatus->setText(s);
+}
+
+QString InstrumentPanel::provenanceLine(const SweepResult& r) const
+{
+    QString cal = r.calState.isEmpty() ? "cal unknown" : r.calState;
+    if (r.calFromHz && r.calToHz)
+        cal += QString(" [%1–%2 MHz]")
+                   .arg(r.calFromHz / 1e6, 0, 'f', 3)
+                   .arg(r.calToHz / 1e6, 0, 'f', 3);
+    return QString("%1 fw %2 · %3 · %4 · %5")
+        .arg(r.instrument, r.firmware.isEmpty() ? "?" : r.firmware,
+             r.port, r.takenAtIso, cal)
+        + (r.antennaNote.isEmpty() ? QString("  ⚠ no provenance note")
+                                   : QString("  · %1").arg(r.antennaNote));
+}
+
+void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
+{
+    setBusy(false);
+
+    if (!result.ok && result.points.isEmpty()) {
+        m_antStatus->setText("failed");
+        log("SWEEP FAILED: " + result.error);
+        QMessageBox::warning(this, "Sweep failed", result.error);
+        return;
+    }
+
+    m_live = result;
+    m_live.antennaNote = m_antNote->text().trimmed();
+
+    // Guardrail 4: report impossible physics loudly rather than plotting it as
+    // though it were a measurement.
+    if (!result.error.isEmpty()) {
+        log("⚠ " + result.error);
+        m_antStatus->setText("SUSPECT — see log");
+    } else {
+        m_antStatus->setText(QString("%1 points").arg(result.points.size()));
+        log(QString("sweep complete: %1 points").arg(result.points.size()));
+    }
+
+    if (result.calFromHz && result.calToHz)
+        m_antCalBadge->setText(QString("cal: %1–%2 MHz")
+                                   .arg(result.calFromHz / 1e6, 0, 'f', 3)
+                                   .arg(result.calToHz / 1e6, 0, 'f', 3));
+    else
+        m_antCalBadge->setText("cal: unknown");
+
+    refreshPlots();
+}
+
+void InstrumentPanel::refreshPlots()
+{
+    const bool spectrum = !m_live.points.isEmpty() && m_live.instrument.contains("tinySA");
+
+    if (spectrum) {
+        TracePlot::Trace t;
+        t.label = "tinySA";
+        t.color = kLive;
+        for (const auto& p : m_live.points) t.points.insert(p.hz, p.dbm);
+        m_plotSa->setTraces({t});
+        m_plotSa->setFrequencyRange(m_live.calFromHz, m_live.calToHz);
+        m_plotSa->setTitle(QString("Spectrum %1–%2 MHz")
+                               .arg(m_live.calFromHz / 1e6, 0, 'f', 3)
+                               .arg(m_live.calToHz / 1e6, 0, 'f', 3));
+        m_plotSa->setProvenance(provenanceLine(m_live));
+        return;
+    }
+
+    TracePlot::Trace swr, r, x, rl;
+    swr.label = "SWR"; swr.color = kLive;
+    r.label = "R"; r.color = kR;
+    x.label = "X"; x.color = kX;
+    rl.label = "return loss"; rl.color = kLive;
+
+    for (const auto& p : m_live.points) {
+        if (std::isfinite(p.swr)) swr.points.insert(p.hz, p.swr);
+        r.points.insert(p.hz, p.r);
+        x.points.insert(p.hz, p.x);
+        rl.points.insert(p.hz, p.returnLossDb);
+    }
+
+    QVector<TracePlot::Trace> swrTraces{swr};
+    if (!m_reference.points.isEmpty()) {
+        TracePlot::Trace ref;
+        ref.label = "baseline";
+        ref.color = kRefer;
+        ref.dashed = true;
+        for (const auto& p : m_reference.points)
+            if (std::isfinite(p.swr)) ref.points.insert(p.hz, p.swr);
+        swrTraces << ref;
+    }
+    // AE's own live SWR on the same axes -- the cross-instrument check that
+    // nothing else in the shack can make.
+    if (m_aeSwr > 0.0 && m_aeSwrHz > 0) {
+        TracePlot::Trace ae;
+        ae.label = "AE reported";
+        ae.color = kAe;
+        ae.points.insert(m_aeSwrHz, m_aeSwr);
+        swrTraces << ae;
+    }
+
+    m_plotSwr->setTraces(swrTraces);
+    m_plotRx->setTraces({r, x});
+    m_plotRl->setTraces({rl});
+
+    const QString prov = provenanceLine(m_live);
+    m_plotSwr->setProvenance(prov);
+    m_plotRx->setProvenance(prov);
+    m_plotRl->setProvenance(prov);
+
+    m_plotSwr->setTitle(QString("SWR — %1").arg(
+        m_live.antennaNote.isEmpty() ? QString("(no provenance note)")
+                                     : m_live.antennaNote));
+
+    if (m_live.calFromHz && m_live.calToHz) {
+        m_plotSwr->setCalibratedRange(m_live.calFromHz, m_live.calToHz);
+        m_plotRx->setCalibratedRange(m_live.calFromHz, m_live.calToHz);
+        m_plotRl->setCalibratedRange(m_live.calFromHz, m_live.calToHz);
+    }
+}
+
+void InstrumentPanel::onCursorMoved(qint64 hz)
+{
+    if (hz < 0) { m_cursorLabel->setText("—"); return; }
+    QString s = QString("%1 MHz").arg(hz / 1e6, 0, 'f', 4);
+    // Nearest measured point wins; interpolating would invent data.
+    const SweepResult& src = m_live;
+    double bestD = 1e18; const SweepPoint* best = nullptr;
+    for (const auto& p : src.points) {
+        const double d = std::abs(double(p.hz - hz));
+        if (d < bestD) { bestD = d; best = &p; }
+    }
+    if (best) {
+        if (src.instrument.contains("tinySA"))
+            s += QString("   %1 dBm").arg(best->dbm, 0, 'f', 1);
+        else
+            s += QString("   SWR %1   R %2   X %3")
+                     .arg(std::isfinite(best->swr) ? QString::number(best->swr, 'f', 2)
+                                                   : QString("∞"))
+                     .arg(best->r, 0, 'f', 1)
+                     .arg(best->x, 0, 'f', 1);
+    }
+    m_cursorLabel->setText(s);
+}
+
+void InstrumentPanel::onSaveClicked()
+{
+    if (m_live.points.isEmpty()) { log("nothing to save."); return; }
+    // Guardrail 2: provenance is REQUIRED. Every wrong conclusion in the
+    // 2026-08-02 session came from not knowing what was on the end of the coax.
+    if (m_antNote->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, "Provenance required",
+            "Describe what was connected before saving.\n\n"
+            "A stored sweep with no provenance is how you end up comparing two "
+            "different antennas and believing the result.");
+        m_antNote->setFocus();
+        return;
+    }
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, "Save to library",
+        "Name this sweep:", QLineEdit::Normal,
+        QString("%1 %2").arg(m_antNote->text().trimmed(),
+                             QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm")),
+        &ok);
+    if (!ok || name.isEmpty()) return;
+
+    m_live.antennaNote = m_antNote->text().trimmed();
+    m_saved.push_back(m_live);
+    m_library->addItem(QString("%1  [%2 pts, %3]")
+                           .arg(name).arg(m_live.points.size(), 0)
+                           .arg(m_live.instrument));
+    log("saved to library: " + name);
+}
+
+void InstrumentPanel::onRecallClicked()
+{
+    const int row = m_library->currentRow();
+    if (row < 0 || row >= m_saved.size()) { log("select a library entry first."); return; }
+    m_reference = m_saved[row];
+    log("overlaying baseline: " + m_library->item(row)->text());
+    refreshPlots();
+}
+
+void InstrumentPanel::onExportCsvClicked()
+{
+    if (m_live.points.isEmpty()) { log("nothing to export."); return; }
+    const QString path = QFileDialog::getSaveFileName(this, "Export sweep CSV",
+        QString("sweep-%1.csv").arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")),
+        "CSV (*.csv)");
+    if (path.isEmpty()) return;
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        log("cannot write " + path);
+        return;
+    }
+    QTextStream ts(&f);
+    // The provenance travels WITH the data, not just on the screen.
+    ts << "# " << provenanceLine(m_live) << "\n";
+    ts << "freq_hz,r_ohm,x_ohm,swr,return_loss_db,dbm\n";
+    for (const auto& p : m_live.points)
+        ts << p.hz << ',' << p.r << ',' << p.x << ','
+           << (std::isfinite(p.swr) ? QString::number(p.swr, 'f', 4) : "inf")
+           << ',' << p.returnLossDb << ',' << p.dbm << '\n';
+    f.close();
+    log("exported " + path);
+}
+
+void InstrumentPanel::noteIncoming(const QString& line)
+{
+    const QString l = line.trimmed().toLower();
+
+    // TX interlock. Err toward "transmitting": a false positive costs a
+    // refused sweep, a false negative costs the analyser's front end.
+    if (l.startsWith("trx:")) {
+        if (l.contains("true")) {
+            if (!m_txActive) log("TX detected — sweeps are blocked until it clears.");
+            m_txActive = true;
+        } else if (l.contains("false")) {
+            m_txActive = false;
+        }
+    }
+
+    // AE's own SWR, for the cross-instrument overlay.
+    if (l.startsWith("tx_sensors:")) {
+        const QStringList parts = l.mid(11).split(',', Qt::SkipEmptyParts);
+        for (const QString& p : parts) {
+            bool ok = false;
+            const double v = p.trimmed().toDouble(&ok);
+            if (ok && v >= 1.0 && v < 100.0) { m_aeSwr = v; break; }
+        }
+    }
+    if (l.startsWith("vfo:")) {
+        const QStringList parts = l.mid(4).split(',', Qt::SkipEmptyParts);
+        if (parts.size() >= 3) {
+            bool ok = false;
+            const qint64 hz = parts.last().trimmed().toLongLong(&ok);
+            if (ok && hz > 0) m_aeSwrHz = hz;
+        }
+    }
+}
+
+} // namespace TciMon

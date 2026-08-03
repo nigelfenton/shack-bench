@@ -22,6 +22,7 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS
     Network
     Widgets
     WebSockets
+    SerialPort
 )
 
 # ── Git build-info ────────────────────────────────────────────────────────
@@ -93,6 +94,9 @@ set(TCIMON_SOURCES
     src/ReplayPanel.cpp
     src/ReplayPanel.h
     src/SwrPlot.cpp
+    src/TracePlot.cpp
+    src/Instrument.cpp
+    src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
     src/CalPlot.h
@@ -127,6 +131,7 @@ target_link_libraries(TciMonitor PRIVATE
     Qt6::Network
     Qt6::Widgets
     Qt6::WebSockets
+    Qt6::SerialPort
 )
 
 if(MSVC)
@@ -166,3 +171,19 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING  "${PROJECT_VERSION}"
     )
 endif()
+
+# ── Hardware probe test ───────────────────────────────────────────────────
+# Exercises the Instrument drivers against whatever is physically plugged in
+# and PRINTS what it found. Deliberately not part of any automated suite: it
+# needs the bench, and a machine with no instruments attached would "fail"
+# for the wrong reason. Build and run it by hand after touching the drivers.
+add_executable(instrument_probe_test
+    tests/instrument_probe_test.cpp
+    src/Instrument.cpp
+)
+target_include_directories(instrument_probe_test PRIVATE src)
+target_link_libraries(instrument_probe_test PRIVATE
+    Qt6::Core
+    Qt6::SerialPort
+)
+set_target_properties(instrument_probe_test PROPERTIES AUTOMOC ON)
