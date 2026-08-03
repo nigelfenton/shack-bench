@@ -48,11 +48,21 @@ QStringList cleanLines(const QString& blob, const QString& echoed)
     return out;
 }
 
+// ⭐ Line terminator is CR ONLY, not CRLF — and this is load-bearing.
+//
+// The RigExpert tolerates a trailing LF on short commands (VER, ON, FQ, SW all
+// answer "OK" either way), but on FRX the stray LF is taken as a second, empty
+// command and the measurement stream never starts: FRX answers a bare "OK" and
+// emits no data. That failure is indistinguishable from a dead instrument, and
+// it cost a full session to find. Send "\r".
+//
+// The NanoVNA and tinySA shells accept CR alone as well, so one terminator
+// serves all three.
 QStringList command(QSerialPort& sp, const QString& cmd,
                     int capMs = 4000, int quietMs = 600)
 {
     sp.clear();
-    sp.write((cmd + "\r\n").toLatin1());
+    sp.write((cmd + "\r").toLatin1());
     sp.flush();
     return cleanLines(readUntilQuiet(sp, capMs, quietMs), cmd);
 }
@@ -210,7 +220,7 @@ void SweepWorker::runRigExpertSweep(const QString& port, qint64 fromHz,
     // span, and it pauses mid-stream, so allow a long cap and a generous quiet
     // window before concluding the instrument has finished.
     sp.clear();
-    sp.write(QString("FRX%1\r\n").arg(points).toLatin1());
+    sp.write(QString("FRX%1\r").arg(points).toLatin1());   // CR only — see command()
     sp.flush();
     const QString blob = readUntilQuiet(sp, 180000, 5000);
 
