@@ -1,6 +1,5 @@
 #include "CalibrationPanel.h"
 
-#include "SaturationCheck.h"
 
 #include "BuildInfo.h"
 #include "CalPlot.h"
@@ -102,11 +101,12 @@ CalibrationPanel::CalibrationPanel(TciClient* tci, QWidget* parent)
 
 // ── UI ────────────────────────────────────────────────────────────────────
 
-// ⭐ The tone peak is no longer a constant. 0.999 mirrors WSJT-X at full Pwr
-// and is right for a Flex-style path, where the radio applies drive downstream.
-// Some backends accept TCI audio at a level where full scale ALREADY clips the
-// modulator — the Hermes-Lite 2 does, per shack-bench#1 — and then there is no
-// ALC knee to find at any tx_gain. Lowering this is the fix for those.
+// The tone peak is adjustable rather than fixed at 0.999 (WSJT-X at full Pwr).
+// Not because full scale "clips" — an earlier version claimed the Hermes-Lite 2
+// saturated there and that was wrong, see the note in concludeRun() — but
+// because calibrating for LINEARITY is the point. Over-driving generates IMD
+// that widens the signal and costs decodes at the far end, so being able to
+// sweep at a lower level is useful in its own right.
 void CalibrationPanel::rebuildTone()
 {
     m_tone.resize(kAudioRate);
@@ -175,18 +175,18 @@ void CalibrationPanel::buildUI()
         m_swrLimit->setValue(3.0);
         m_swrLimit->setToolTip("Abort the whole run if SWR exceeds this.");
 
-        // ⭐ Tone peak, because 0.999 is right for a Flex-style path but
-        // saturates some backends before the sweep can say anything.
+        // Tone peak — see rebuildTone(). Adjustable for linearity work.
         m_tonePeakBox = new QDoubleSpinBox;
         m_tonePeakBox->setRange(0.05, 0.999);
         m_tonePeakBox->setDecimals(3);
         m_tonePeakBox->setSingleStep(0.05);
         m_tonePeakBox->setValue(kTonePeak);
         m_tonePeakBox->setToolTip(
-            "Test-tone amplitude, full scale = 0.999 (WSJT-X at 100% Pwr).\n"
-            "Lower it if the run reports the TX audio is clipping — some\n"
-            "backends (Hermes-Lite 2) saturate at full scale, and then no\n"
-            "tx_gain produces an ALC knee.");
+            "Test-tone amplitude, full scale = 0.999 (WSJT-X at 100% Pwr).\n\n"
+            "For weak-signal work the goal is a CLEAN signal, not a loud one.\n"
+            "Over-driving the audio creates intermodulation products: the\n"
+            "signal splatters into adjacent bandwidth and decodes WORSE at\n"
+            "the far end despite showing more watts. Calibrate for linearity.");
         connect(m_tonePeakBox, &QDoubleSpinBox::valueChanged, this,
                 [this](double v) { m_tonePeak = v; rebuildTone(); });
 
@@ -754,28 +754,37 @@ void CalibrationPanel::concludeRun(int recGain)
             QString("Recommended tx_gain = %1%2").arg(recGain).arg(detail));
         log(QString("RESULT — recommended tx_gain=%1").arg(recGain), "#ffd400");
     } else {
-        // ⚠ "No knee" has two very different causes, and the old message named
-        // only one of them. If the input was already clipping, widening the
-        // sweep cannot help — tx_gain has stopped affecting the result — and
-        // that advice sends the operator in the wrong direction. Check before
-        // saying anything (shack-bench#1, Hermes-Lite 2).
-        QVector<SatPoint> sp;
+        // ⚠ Do NOT guess at a cause here. A previous version claimed a flat
+        // ALC curve proved the TX audio was clipping, and told the operator to
+        // lower the tone peak. That was wrong: on a Hermes-Lite 2 the whole
+        // sweep reads flat because a CONSTANT-AMPLITUDE tone produces constant
+        // RF — which is correct SSB behaviour, not a fault. The radio was
+        // transmitting perfectly well throughout (21 PSKReporter spots across
+        // two continents during the very run that "proved" the defect).
+        //
+        // Naming a wrong cause is worse than naming none, because the operator
+        // acts on it. Report what was observed and let them judge.
+        double alcLo = 0, alcHi = 0;
+        bool haveAlc = false;
         for (const Row& r : m_allRows) {
-            SatPoint p;
-            p.gain = r.gain;
-            p.fwdAvg = r.fwdAvg;
-            p.alcMax = r.alcMax;
-            p.hasAlc = r.hasAlc;
-            sp << p;
+            if (!r.hasAlc) continue;
+            if (!haveAlc) { alcLo = alcHi = r.alcMax; haveAlc = true; }
+            alcLo = std::min(alcLo, r.alcMax);
+            alcHi = std::max(alcHi, r.alcMax);
         }
-        const SatVerdict sat = checkSaturation(sp, m_alcTargetVal);
 
-        if (sat.saturated) {
+        if (haveAlc && (alcHi - alcLo) < 1.0) {
+            // Flat ALC across the sweep. Several causes are consistent with
+            // this and the sweep cannot tell them apart, so list them.
             m_result->setText(
-                "TX audio is CLIPPING — no knee exists to find. "
-                "Lower the test tone peak; widening the sweep will not help.");
-            log("SATURATED — " + sat.reason, "#ff5050");
-            log(sat.advice, "#ffaa00");
+                QString("No knee found — ALC barely moved (%1 dB across the "
+                        "sweep). Cause undetermined.").arg(alcHi - alcLo, 0, 'f', 1));
+            log(QString("run finished — ALC flat at ~%1 dBFS across the whole "
+                        "sweep").arg(alcHi, 0, 'f', 1), "#ffaa00");
+            log("This sweep cannot say why. A steady test tone gives constant "
+                "RF by design, so a flat curve here may be entirely normal. "
+                "Check the ALC reading against a real varying signal before "
+                "changing anything.", "#6b8099");
         } else {
             m_result->setText("No recommendation — widen the sweep or raise "
                               "the ALC target.");
