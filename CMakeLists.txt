@@ -102,6 +102,7 @@ set(TCIMON_SOURCES
     src/TrapAnalysis.cpp
     src/GuidePanel.cpp
     src/CableTests.cpp
+    src/SaturationCheck.cpp
     resources/shackbench.qrc
     src/InstrumentPanel.cpp
     src/SwrPlot.h
@@ -249,3 +250,15 @@ target_link_libraries(cable_tests_test PRIVATE Qt6::Core Qt6::SerialPort)
 set_target_properties(cable_tests_test PROPERTIES AUTOMOC ON)
 add_test(NAME cable_tests_test COMMAND cable_tests_test)
 
+
+# ── TX Cal saturation detection ───────────────────────────────────────────
+# Tells a clipped input apart from a missed knee, using the real HL2
+# telemetry from shack-bench#1 as the positive case.
+add_executable(saturation_check_test
+    tests/saturation_check_test.cpp
+    src/SaturationCheck.cpp
+)
+target_include_directories(saturation_check_test PRIVATE src)
+target_link_libraries(saturation_check_test PRIVATE Qt6::Core)
+set_target_properties(saturation_check_test PROPERTIES AUTOMOC ON)
+add_test(NAME saturation_check_test COMMAND saturation_check_test)

@@ -59,6 +59,8 @@ private slots:
 private:
     enum class Phase { Idle, Settle, Keyed, Cooldown };
 
+    double m_tonePeak{0.999};
+
     struct Row {
         int    rf{0};
         int    gain{0};
@@ -69,6 +71,7 @@ private:
     };
 
     void buildUI();
+    void rebuildTone();
     void refreshBanner();
     void log(const QString& text, const QString& colorHex);
     void setRunning(bool running);
@@ -98,6 +101,7 @@ private:
     QDoubleSpinBox* m_alcTarget{};
     QDoubleSpinBox* m_dwell{};
     QDoubleSpinBox* m_cooldown{};
+    QDoubleSpinBox* m_tonePeakBox{};
     QDoubleSpinBox* m_swrLimit{};
     QLineEdit*      m_coarseEdit{};
     QPushButton*    m_startBtn{};

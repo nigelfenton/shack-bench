@@ -1,5 +1,7 @@
 #include "CalibrationPanel.h"
 
+#include "SaturationCheck.h"
+
 #include "BuildInfo.h"
 #include "CalPlot.h"
 #include "TciClient.h"
@@ -89,11 +91,9 @@ CalibrationPanel::CalibrationPanel(TciClient* tci, QWidget* parent)
     connect(m_audio,    &QTimer::timeout, this, &CalibrationPanel::onAudioTick);
     connect(m_watchdog, &QTimer::timeout, this, &CalibrationPanel::onWatchdog);
 
-    // One second of mono test tone, generated once and looped.
-    m_tone.resize(kAudioRate);
-    for (int n = 0; n < kAudioRate; ++n)
-        m_tone[n] = float(kTonePeak *
-            std::sin(2.0 * kPi * kToneHz * n / kAudioRate));
+    // One second of mono test tone, regenerated whenever the peak changes.
+    m_tonePeak = kTonePeak;
+    rebuildTone();
 
     buildUI();
     refreshBanner();
@@ -101,6 +101,19 @@ CalibrationPanel::CalibrationPanel(TciClient* tci, QWidget* parent)
 }
 
 // ── UI ────────────────────────────────────────────────────────────────────
+
+// ⭐ The tone peak is no longer a constant. 0.999 mirrors WSJT-X at full Pwr
+// and is right for a Flex-style path, where the radio applies drive downstream.
+// Some backends accept TCI audio at a level where full scale ALREADY clips the
+// modulator — the Hermes-Lite 2 does, per shack-bench#1 — and then there is no
+// ALC knee to find at any tx_gain. Lowering this is the fix for those.
+void CalibrationPanel::rebuildTone()
+{
+    m_tone.resize(kAudioRate);
+    for (int n = 0; n < kAudioRate; ++n)
+        m_tone[n] = float(m_tonePeak *
+            std::sin(2.0 * kPi * kToneHz * n / kAudioRate));
+}
 
 void CalibrationPanel::buildUI()
 {
@@ -162,6 +175,21 @@ void CalibrationPanel::buildUI()
         m_swrLimit->setValue(3.0);
         m_swrLimit->setToolTip("Abort the whole run if SWR exceeds this.");
 
+        // ⭐ Tone peak, because 0.999 is right for a Flex-style path but
+        // saturates some backends before the sweep can say anything.
+        m_tonePeakBox = new QDoubleSpinBox;
+        m_tonePeakBox->setRange(0.05, 0.999);
+        m_tonePeakBox->setDecimals(3);
+        m_tonePeakBox->setSingleStep(0.05);
+        m_tonePeakBox->setValue(kTonePeak);
+        m_tonePeakBox->setToolTip(
+            "Test-tone amplitude, full scale = 0.999 (WSJT-X at 100% Pwr).\n"
+            "Lower it if the run reports the TX audio is clipping — some\n"
+            "backends (Hermes-Lite 2) saturate at full scale, and then no\n"
+            "tx_gain produces an ALC knee.");
+        connect(m_tonePeakBox, &QDoubleSpinBox::valueChanged, this,
+                [this](double v) { m_tonePeak = v; rebuildTone(); });
+
         m_coarseEdit = new QLineEdit("10,20,30,40,50,60,70,80,90,100");
         m_coarseEdit->setToolTip("Comma list of tx_gain values for the "
                                  "coarse pass. A fine pass auto-runs "
@@ -177,8 +205,10 @@ void CalibrationPanel::buildUI()
         grid->addWidget(m_cooldown,        1, 3);
         grid->addWidget(cap("SWR ABORT >"),0, 4);
         grid->addWidget(m_swrLimit,        1, 4);
-        grid->addWidget(cap("COARSE tx_gain SWEEP"), 2, 0, 1, 5);
-        grid->addWidget(m_coarseEdit,      3, 0, 1, 5);
+        grid->addWidget(cap("TONE PEAK"),  0, 5);
+        grid->addWidget(m_tonePeakBox,     1, 5);
+        grid->addWidget(cap("COARSE tx_gain SWEEP"), 2, 0, 1, 6);
+        grid->addWidget(m_coarseEdit,      3, 0, 1, 6);
         v->addLayout(grid);
     }
 
@@ -724,9 +754,33 @@ void CalibrationPanel::concludeRun(int recGain)
             QString("Recommended tx_gain = %1%2").arg(recGain).arg(detail));
         log(QString("RESULT — recommended tx_gain=%1").arg(recGain), "#ffd400");
     } else {
-        m_result->setText("No recommendation — widen the sweep or raise the "
-                           "ALC target.");
-        log("run finished — no knee found", "#ffaa00");
+        // ⚠ "No knee" has two very different causes, and the old message named
+        // only one of them. If the input was already clipping, widening the
+        // sweep cannot help — tx_gain has stopped affecting the result — and
+        // that advice sends the operator in the wrong direction. Check before
+        // saying anything (shack-bench#1, Hermes-Lite 2).
+        QVector<SatPoint> sp;
+        for (const Row& r : m_allRows) {
+            SatPoint p;
+            p.gain = r.gain;
+            p.fwdAvg = r.fwdAvg;
+            p.alcMax = r.alcMax;
+            p.hasAlc = r.hasAlc;
+            sp << p;
+        }
+        const SatVerdict sat = checkSaturation(sp, m_alcTargetVal);
+
+        if (sat.saturated) {
+            m_result->setText(
+                "TX audio is CLIPPING — no knee exists to find. "
+                "Lower the test tone peak; widening the sweep will not help.");
+            log("SATURATED — " + sat.reason, "#ff5050");
+            log(sat.advice, "#ffaa00");
+        } else {
+            m_result->setText("No recommendation — widen the sweep or raise "
+                              "the ALC target.");
+            log("run finished — no knee found", "#ffaa00");
+        }
     }
     // Restore the slice mode if we forced DIGU for the run.
     if (!m_savedMode.isEmpty() && m_tci) {
