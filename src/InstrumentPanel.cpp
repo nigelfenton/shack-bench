@@ -488,11 +488,42 @@ void InstrumentPanel::buildTrapTab()
         "  f0 = the notch minimum\n"
         "  Q  = f0 / (3 dB bandwidth)   [LOADED Q, not unloaded]\n"
         "  L,C from f0 and Q in the fixture impedance\n\n"
-        "⚠ Without a THROUGH calibration, f0 is still reliable but the notch\n"
-        "  depth includes fixture loss and Q is approximate.");
+        "Press \"Calibration guide\" on the right for the THROUGH cal that\n"
+        "makes depth and Q quantitative, or \"How this works\" for the method.");
     v->addWidget(m_trapReport);
 
-    m_tabs->addTab(page, "Trap");
+    // ⭐ The guide sits BESIDE the measurement, not in a manual: the reasoning
+    // and the verification belong next to the thing they are about.
+    m_guide = new GuidePanel();
+    m_guide->setGuide(trapGuide());
+    connect(m_guide, &GuidePanel::runCommand,
+            this, &InstrumentPanel::onGuideCommand);
+
+    auto* guideBar = new QHBoxLayout();
+    auto* calBtn = new QPushButton("Calibration guide");
+    connect(calBtn, &QPushButton::clicked, this,
+            &InstrumentPanel::onShowCalGuide);
+    guideBar->addWidget(calBtn);
+    auto* howBtn = new QPushButton("How this works");
+    connect(howBtn, &QPushButton::clicked, this,
+            &InstrumentPanel::onShowTrapGuide);
+    guideBar->addWidget(howBtn);
+    guideBar->addStretch();
+
+    auto* right = new QWidget();
+    auto* rv = new QVBoxLayout(right);
+    rv->setContentsMargins(0, 0, 0, 0);
+    rv->addLayout(guideBar);
+    rv->addWidget(m_guide, 1);
+
+    auto* trapSplit = new QSplitter(Qt::Horizontal);
+    trapSplit->addWidget(page);
+    trapSplit->addWidget(right);
+    trapSplit->setStretchFactor(0, 3);
+    trapSplit->setStretchFactor(1, 2);
+    trapSplit->setSizes({880, 600});
+
+    m_tabs->addTab(trapSplit, "Trap");
 }
 
 void InstrumentPanel::onTrapSweep()
