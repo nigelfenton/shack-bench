@@ -1,0 +1,60 @@
+<svg viewBox="0 0 680 560" width="680" height="560" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="680" height="560" fill="#050a14"/>
+
+  <rect x="20" y="18" width="290" height="86" rx="8" fill="#12283f" stroke="#4fc3f7" stroke-width="1.5"/>
+  <text x="165" y="46" text-anchor="middle" fill="#cfe3ff" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600">VNA port A</text>
+  <text x="165" y="68" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">drives the shield outer surface</text>
+  <text x="165" y="88" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">S21 out</text>
+
+  <rect x="370" y="18" width="290" height="86" rx="8" fill="#12283f" stroke="#4fc3f7" stroke-width="1.5"/>
+  <text x="515" y="46" text-anchor="middle" fill="#cfe3ff" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600">VNA port B</text>
+  <text x="515" y="68" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">receives what gets through</text>
+  <text x="515" y="88" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">S21 in</text>
+
+  <line x1="165" y1="104" x2="165" y2="144" stroke="#6b8099" stroke-width="2"/>
+  <polygon points="160,144 170,144 165,152" fill="#6b8099"/>
+  <line x1="515" y1="152" x2="515" y2="112" stroke="#6b8099" stroke-width="2"/>
+  <polygon points="510,112 520,112 515,104" fill="#6b8099"/>
+
+  <rect x="20" y="150" width="290" height="150" rx="6" fill="#2a2213" stroke="#ffb454" stroke-width="1.5"/>
+  <text x="165" y="176" text-anchor="middle" fill="#ffd866" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600">copper pad A</text>
+  <text x="165" y="198" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">SO-239 flange soldered to it</text>
+
+  <rect x="370" y="150" width="290" height="150" rx="6" fill="#2a2213" stroke="#ffb454" stroke-width="1.5"/>
+  <text x="515" y="176" text-anchor="middle" fill="#ffd866" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600">copper pad B</text>
+  <text x="515" y="198" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">SO-239 flange soldered to it</text>
+
+  <circle cx="120" cy="238" r="15" fill="#1c2836" stroke="#8fb8ff" stroke-width="1.5"/>
+  <text x="120" y="243" text-anchor="middle" fill="#cfe3ff" font-family="Segoe UI, sans-serif" font-size="11">pin</text>
+  <line x1="135" y1="238" x2="196" y2="238" stroke="#ff7b72" stroke-width="4"/>
+  <text x="228" y="243" text-anchor="middle" fill="#ff7b72" font-family="Segoe UI, sans-serif" font-size="12">shorted</text>
+  <text x="165" y="280" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">kills the inside path</text>
+
+  <circle cx="470" cy="238" r="15" fill="#1c2836" stroke="#8fb8ff" stroke-width="1.5"/>
+  <text x="470" y="243" text-anchor="middle" fill="#cfe3ff" font-family="Segoe UI, sans-serif" font-size="11">pin</text>
+  <line x1="485" y1="238" x2="546" y2="238" stroke="#ff7b72" stroke-width="4"/>
+  <text x="578" y="243" text-anchor="middle" fill="#ff7b72" font-family="Segoe UI, sans-serif" font-size="12">shorted</text>
+  <text x="515" y="280" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">kills the inside path</text>
+
+  <rect x="320" y="150" width="40" height="150" fill="#2b1416" stroke="#ff7b72" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="340" y="230" text-anchor="middle" fill="#ff7b72" font-family="Segoe UI, sans-serif" font-size="12" transform="rotate(-90 340 230)">slot</text>
+
+  <line x1="165" y1="300" x2="165" y2="360" stroke="#6b8099" stroke-width="2"/>
+  <line x1="515" y1="300" x2="515" y2="360" stroke="#6b8099" stroke-width="2"/>
+  <line x1="165" y1="360" x2="255" y2="360" stroke="#6b8099" stroke-width="2"/>
+  <line x1="425" y1="360" x2="515" y2="360" stroke="#6b8099" stroke-width="2"/>
+  <text x="207" y="352" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">tail</text>
+  <text x="473" y="352" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">tail</text>
+
+  <rect x="255" y="330" width="170" height="60" rx="6" fill="#123028" stroke="#7ee787" stroke-width="1.8"/>
+  <text x="340" y="356" text-anchor="middle" fill="#7ee787" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600">choke under test</text>
+  <text x="340" y="377" text-anchor="middle" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">the only path across</text>
+
+  <rect x="20" y="416" width="640" height="52" rx="6" fill="#161d29" stroke="#3a4657" stroke-width="1.2"/>
+  <text x="40" y="440" fill="#dde6f0" font-family="Segoe UI, sans-serif" font-size="14">Low impedance across the choke</text>
+  <text x="40" y="460" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">signal crosses the slot, S21 near 0 dB, choke doing nothing</text>
+
+  <rect x="20" y="480" width="640" height="52" rx="6" fill="#123028" stroke="#7ee787" stroke-width="1.4"/>
+  <text x="40" y="504" fill="#dde6f0" font-family="Segoe UI, sans-serif" font-size="14">High impedance across the choke</text>
+  <text x="40" y="524" fill="#9fb4cc" font-family="Segoe UI, sans-serif" font-size="12">signal blocked, S21 well down, choke working</text>
+</svg>

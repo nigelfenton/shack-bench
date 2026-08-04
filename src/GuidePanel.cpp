@@ -389,30 +389,61 @@ const Guide& chokeGuide()
         s.body =
             "<p>Named for Steve Hunt G3TXQ, whose measurements are the standard "
             "amateur reference for this.</p>"
-            "<p>Two SO-239 sockets, and:</p>"
-            "<ul>"
-            "<li>each socket's <b>centre pin shorted to its own shell</b></li>"
-            "<li>the choke under test bridging the <b>two shells</b></li>"
-            "</ul>"
-            "<p>Because the centre pins are tied to their shells, the analyser "
-            "cannot see the inside of the coax at all — it drives the shield's "
-            "outer surface, which is exactly the path the choke exists to "
-            "block. The choke becomes a series element between the two ports, "
-            "so the impedance follows from S21.</p>"
-            "<p>⚠ Keep the leads short. At 30 MHz a few inches of stray wiring "
-            "has its own inductance and will flatter or spoil the result.</p>";
+            "<p><img src=\":/img/g3txq-fixture.svg\" width=\"560\"></p>"
+            "<p>Three things make it work:</p>"
+            "<p><b>1. Each centre pin is shorted to its own pad.</b> This is the "
+            "counter-intuitive step — you are deliberately destroying the normal "
+            "signal path. Coax has three conductors, not two: the centre, the "
+            "<i>inside</i> of the braid, and the <i>outside</i> of the braid. At "
+            "RF the skin effect keeps current on the surface, so inside and "
+            "outside behave as separate conductors. Shorting centre to shell "
+            "removes the inside pair from the measurement, leaving only the "
+            "outside — the path a choke exists to block.</p>"
+            "<p><b>2. A slot separates the two pads.</b> Without it the board "
+            "itself is a short circuit and you measure nothing but copper, "
+            "whatever is clipped on. The slot forces every bit of current to "
+            "detour through the choke.</p>"
+            "<p><b>3. The choke bridges the gap on two short tails.</b> It is "
+            "now simply a series element between two 50 Ω ports, which is why "
+            "Zcm = 2·Z0·(1/S21 − 1) applies — ordinary two-port maths.</p>"
+            "<p>⚠ Keep the tails short. They are in series with the thing you "
+            "are measuring, so their own inductance adds to the reading — "
+            "flattering the choke, and worst at 10 m where a few inches "
+            "matters most.</p>";
         guide.steps << s;
 
         s = {};
-        s.title = "Fit the choke and connect";
+        s.title = "Bound the fixture first — floor and ceiling";
         s.body =
-            "<p>Fixture between <b>CH0 and CH1</b>, choke bridging the shells.</p>"
-            "<p>⚠ Measure the <b>bare fixture</b> first, with the shells bridged "
-            "by a short strap instead of the choke. That tells you the fixture's "
-            "own floor — if it reads only a few hundred ohms empty, it cannot "
-            "honestly report a kilohm with a choke fitted.</p>";
+            "<p>Before trusting any choke reading, measure the jig on its own "
+            "twice. These two sweeps say what a later number is actually "
+            "worth.</p>"
+            "<p><b>Strap across the tails — the FLOOR.</b> Shorting the tails "
+            "together should read a few ohms. If the empty fixture already "
+            "shows several hundred, it cannot honestly report a kilohm with a "
+            "choke fitted, and every result will be inflated by that error.</p>"
+            "<p><b>Tails open — the CEILING.</b> Stray capacitance across the "
+            "slot sets the highest impedance the jig can resolve. Above that "
+            "figure you are measuring the fixture, not the choke. A choke "
+            "reading close to the ceiling is not a good choke; it is an "
+            "exhausted fixture.</p>"
+            "<p>Same discipline as the calibration verify step: measure the "
+            "known thing first, so you know what the unknown reading means.</p>";
         s.needsFitting = true;
-        s.fitting = "the G3TXQ fixture across CH0–CH1, choke bridging the shells";
+        s.fitting = "a strap across the tails (floor), then nothing (ceiling)";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Fit the choke";
+        s.body =
+            "<p>Now put the choke under test across the tails, fixture still "
+            "between <b>CH0 and CH1</b>.</p>"
+            "<p>If you are comparing several chokes, keep everything else "
+            "identical — same tails, same clip positions, same sweep. Anything "
+            "that changes between measurements must be the choke, or you are "
+            "comparing fixtures.</p>";
+        s.needsFitting = true;
+        s.fitting = "the choke under test across the two tails";
         guide.steps << s;
 
         s = {};

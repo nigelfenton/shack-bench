@@ -23,6 +23,7 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS
     Widgets
     WebSockets
     SerialPort
+    Svg
 )
 
 # ── Git build-info ────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ set(TCIMON_SOURCES
     src/TrapAnalysis.cpp
     src/GuidePanel.cpp
     src/CableTests.cpp
+    resources/shackbench.qrc
     src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
@@ -137,6 +139,7 @@ target_link_libraries(ShackBench PRIVATE
     Qt6::Widgets
     Qt6::WebSockets
     Qt6::SerialPort
+    Qt6::Svg
 )
 
 if(MSVC)
@@ -245,3 +248,4 @@ target_include_directories(cable_tests_test PRIVATE src)
 target_link_libraries(cable_tests_test PRIVATE Qt6::Core Qt6::SerialPort)
 set_target_properties(cable_tests_test PROPERTIES AUTOMOC ON)
 add_test(NAME cable_tests_test COMMAND cable_tests_test)
+
