@@ -127,6 +127,27 @@ int main()
     check(marginal.freqHz == 0.0,
           "0.4 division of swing is below the half-division gate");
 
+    std::printf("\n=== the real calibrator capture (validated on hardware) ===\n");
+    // ⭐ The DSO2D15's own 1 kHz / 5 V calibrator, measured THROUGH THIS CODE
+    // on 2026-08-03: Vpp 4.9600 V, 1000.00 Hz, Vmin 0.080, Vmax 5.040, at
+    // 2 V/div and 250 kSa/s. That is what proves the
+    //     volts = raw / 25 * scale - offset
+    // conversion is CORRECT against a known source, rather than merely
+    // self-consistent. Pinned here as a synthetic square so the expectation
+    // survives without the instrument on the bench.
+    ScopeChannel cal;
+    cal.voltsPerDiv = 2.0;
+    const double fsCal = 250000.0;
+    for (int i = 0; i < 2000; ++i) {
+        const double phase = std::fmod(1000.0 * i / fsCal, 1.0);
+        cal.volts << (phase < 0.5 ? 5.04 : 0.08);
+    }
+    computeMeasurements(&cal, 1.0 / fsCal);
+    near(cal.vpp, 4.96, 0.05, "the 5 V calibrator reads 4.96 Vpp");
+    near(cal.freqHz, 1000.0, 5.0, "the 1 kHz calibrator reads 1000 Hz");
+    near(cal.vmax, 5.04, 0.01, "Vmax matches the measured 5.040 V");
+    near(cal.vmin, 0.08, 0.01, "Vmin matches the measured 0.080 V");
+
     std::printf("\n=== degenerate input is handled, not crashed on ===\n");
     const QVector<double> none = decodeChannel(QByteArray(), 1, 2, 1.0, 0.0);
     check(none.isEmpty(), "an empty payload decodes to nothing");

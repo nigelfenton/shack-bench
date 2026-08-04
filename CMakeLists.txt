@@ -217,3 +217,4 @@ set_target_properties(scope_decode_test PROPERTIES AUTOMOC ON)
 add_test(NAME scope_decode_test COMMAND scope_decode_test)
 
 
+

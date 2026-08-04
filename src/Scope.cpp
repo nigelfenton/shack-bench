@@ -366,7 +366,21 @@ void ScopeWorker::capture(const QString& resource)
         emit finished(out);
         return;
     }
-    const QByteArray buf = s.readRaw();
+    // ⚠ The scope sometimes returns the "#9<9-digit length>" header as its own
+    // short transfer, ending with VI_SUCCESS, and sends the payload on the
+    // NEXT read. A single readRaw() therefore comes back with just 11 bytes.
+    // Keep reading until the declared block length has actually arrived.
+    QByteArray buf = s.readRaw();
+    if (buf.size() >= 11 && buf.at(0) == '#' && buf.at(1) == '9') {
+        bool okLen = false;
+        const int declared = buf.mid(2, 9).toInt(&okLen);
+        for (int guard = 0; okLen && guard < 64 && buf.size() < 11 + declared;
+             ++guard) {
+            const QByteArray more = s.readRaw();
+            if (more.isEmpty()) break;
+            buf += more;
+        }
+    }
     if (buf.size() < 129 || buf.at(0) != '#' || buf.at(1) != '9') {
         out.error = QString("unexpected waveform reply (%1 bytes, header %2)")
                         .arg(buf.size())
