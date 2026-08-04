@@ -3,6 +3,7 @@
 #include "TciClient.h"
 #include "TracePlot.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDoubleSpinBox>
@@ -752,21 +753,81 @@ void InstrumentPanel::log(const QString& line)
 
 void InstrumentPanel::onProbeClicked()
 {
+    // The probe opens serial ports and waits on replies, so it must not run on
+    // the GUI thread — doing so froze the whole window for the duration and
+    // made a 3 s probe feel broken rather than slow.
     log("probing serial ports (read-only; no sweep is started)…");
+    QApplication::setOverrideCursor(Qt::BusyCursor);
+
     QStringList detail;
-    m_found = probeInstruments(&detail);
+    QVector<InstrumentId> found;
+    {
+        // QtConcurrent would drag in another module for one call; a scoped
+        // thread is enough and keeps the dependency list short.
+        QThread worker;
+        QObject ctx;
+        ctx.moveToThread(&worker);
+        QObject::connect(&worker, &QThread::started, &ctx, [&] {
+            found = probeInstruments(&detail);
+            worker.quit();
+        });
+        worker.start();
+        while (worker.isRunning()) {
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+            QThread::msleep(10);
+        }
+        worker.wait(2000);
+    }
+    QApplication::restoreOverrideCursor();
+
+    m_found = found;
     for (const QString& d : detail) log("  " + d);
 
+    // ⚠ Only the antenna analysers belong in this dropdown — the tinySA is a
+    // spectrum analyser and lives on its own tab. Previously "found 2" could
+    // still leave the box empty with no explanation, which reads as a bug.
     m_antInstrument->clear();
+    int analysers = 0;
     for (const auto& id : m_found) {
         if (id.kind == InstrumentId::Kind::RigExpert ||
-            id.kind == InstrumentId::Kind::NanoVna)
+            id.kind == InstrumentId::Kind::NanoVna) {
             m_antInstrument->addItem(id.describe(), id.port);
+            ++analysers;
+        }
     }
-    if (m_antInstrument->count() == 0)
+    if (analysers == 0)
         m_antInstrument->addItem("(no antenna analyser found)");
 
-    log(QString("found %1 instrument(s)").arg(m_found.size()));
+    // Say what was found AND where it went, so an empty dropdown is explained
+    // rather than merely observed.
+    QStringList kinds;
+    for (const auto& id : m_found) {
+        switch (id.kind) {
+        case InstrumentId::Kind::RigExpert:
+        case InstrumentId::Kind::NanoVna:
+            kinds << QString("%1 → Antenna tab").arg(id.describe()); break;
+        case InstrumentId::Kind::TinySa:
+            kinds << QString("%1 → Spectrum tab").arg(id.describe()); break;
+        default: break;
+        }
+    }
+    for (const QString& k : kinds) log("  " + k);
+    log(QString("found %1 instrument(s): %2 antenna analyser(s)")
+            .arg(m_found.size()).arg(analysers));
+    if (analysers == 0)
+        log("  no antenna analyser attached — the RigExpert AA-170 and the "
+            "NanoVNA are the two this tab can use.");
+
+    // The scope is on a different transport, so re-check it here too.
+    if (m_scopeResource.isEmpty() && scopeVisaAvailable(nullptr)) {
+        QString findLog;
+        m_scopeResource = findScopeResource(&findLog);
+        if (!m_scopeResource.isEmpty()) {
+            m_scopeCapture->setEnabled(true);
+            m_scopeStatus->setText(m_scopeResource);
+            log("  scope: " + findLog);
+        }
+    }
 }
 
 bool InstrumentPanel::txInterlockBlocks(QString* why) const

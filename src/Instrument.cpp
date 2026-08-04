@@ -79,7 +79,11 @@ bool openPort(QSerialPort& sp, const QString& port, int baud, QString* err)
         if (err) *err = QString("cannot open %1: %2").arg(port, sp.errorString());
         return false;
     }
-    QThread::msleep(300);
+    // 120 ms is enough for a CDC/FTDI port to settle. This is paid on EVERY
+    // open, and probing pays it once per candidate baud rate per port, so it
+    // dominates the probe time -- 300 ms here made a two-instrument probe feel
+    // sluggish for no benefit.
+    QThread::msleep(120);
     sp.clear();
     return true;
 }
@@ -119,10 +123,16 @@ QVector<InstrumentId> probeInstruments(QStringList* log)
         InstrumentId id;
         id.port = info.portName();
 
-        // The RigExpert is FTDI and speaks a bare ASCII protocol at 38400 with
-        // no prompt; the VNA/SA pair are STM32 CDC shells at 115200. Try the
-        // shell first, then the RigExpert dialect.
-        {
+        // ⭐ The USB vendor id says which dialect to try, so a port is probed
+        // ONCE rather than at both candidate baud rates. FTDI (0x0403) is the
+        // RigExpert; STM32 CDC (0x0483) is the NanoVNA/tinySA pair. Anything
+        // else still gets both, since an unknown adapter could be either.
+        const quint16 vid = info.hasVendorIdentifier()
+                                ? info.vendorIdentifier() : 0;
+        const bool looksFtdi  = (vid == 0x0403);
+        const bool looksStm32 = (vid == 0x0483);
+
+        if (!looksFtdi) {
             QSerialPort sp;
             QString err;
             if (openPort(sp, id.port, 115200, &err)) {
@@ -153,7 +163,7 @@ QVector<InstrumentId> probeInstruments(QStringList* log)
             }
         }
 
-        if (id.kind == InstrumentId::Kind::Unknown) {
+        if (id.kind == InstrumentId::Kind::Unknown && !looksStm32) {
             QSerialPort sp;
             QString err;
             if (openPort(sp, id.port, 38400, &err)) {
