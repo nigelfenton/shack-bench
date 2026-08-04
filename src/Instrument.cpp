@@ -364,6 +364,83 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     emit finished(res);
 }
 
+void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
+                                     qint64 toHz, int points)
+{
+    m_cancel = false;
+    SweepResult res;
+    res.instrument = "NanoVNA-F V2 (S21 through)";
+    res.port = port;
+    res.takenAtIso = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QSerialPort sp;
+    QString err;
+    if (!openPort(sp, port, 115200, &err)) {
+        res.error = err;
+        emit finished(res);
+        return;
+    }
+
+    const QStringList v = command(sp, "version", 2000, 400);
+    if (!v.isEmpty()) res.firmware = v.first();
+
+    // A trap measurement needs a THROUGH cal to be quantitative. Record what
+    // the instrument actually has so the panel can say which it was.
+    const QStringList cal = command(sp, "cal", 2000, 400);
+    res.calState = cal.isEmpty() ? QString("unknown") : cal.first();
+
+    command(sp, QString("sweep %1 %2 %3").arg(fromHz).arg(toHz).arg(points),
+            4000, 800);
+    QThread::msleep(600);
+
+    emit progress(0, points, "reading frequencies");
+    const QStringList freqs = command(sp, "frequencies", 30000, 2500);
+    emit progress(points / 3, points, "reading S21");
+    const QStringList data = command(sp, "data 1", 30000, 2500);
+
+    // ⚠ These two lists can differ in length on this firmware — data 1 has
+    // been observed returning 100 where frequencies returns 201. Pair against
+    // the shorter, and scale the frequency axis across the SWEEP span so the
+    // points still land at the right frequencies.
+    const int n = std::min(freqs.size(), data.size());
+    const bool mismatched = freqs.size() != data.size();
+    for (int i = 0; i < n && !m_cancel; ++i) {
+        qint64 hz = 0;
+        if (mismatched) {
+            hz = fromHz + (toHz - fromHz) * qint64(i) / std::max(1, n - 1);
+        } else {
+            bool okHz = false;
+            hz = freqs[i].toLongLong(&okHz);
+            if (!okHz) continue;
+        }
+        const QStringList ri = data[i].split(' ', Qt::SkipEmptyParts);
+        if (ri.size() < 2) continue;
+        const double re = ri[0].toDouble();
+        const double im = ri[1].toDouble();
+        const double mag = std::hypot(re, im);
+
+        SweepPoint pt;
+        pt.hz = hz;
+        // Reuse the dbm field to carry |S21| in dB — the trap tab reads it and
+        // no other consumer looks at dbm on a VNA sweep.
+        pt.dbm = (mag > 0) ? 20.0 * std::log10(mag) : -120.0;
+        res.points.push_back(pt);
+    }
+    sp.close();
+
+    if (res.points.isEmpty()) {
+        res.error = "no S21 data returned";
+    } else {
+        res.ok = true;
+        if (mismatched)
+            res.error = QString("the instrument returned %1 frequencies but "
+                                "%2 S21 points; the frequency axis was "
+                                "interpolated across the requested span.")
+                            .arg(freqs.size()).arg(data.size());
+    }
+    emit finished(res);
+}
+
 void SweepWorker::runTinySaSweep(const QString& port, qint64 fromHz,
                                  qint64 toHz, int points)
 {

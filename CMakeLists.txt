@@ -98,6 +98,7 @@ set(TCIMON_SOURCES
     src/Instrument.cpp
     src/CoaxAnalysis.cpp
     src/Scope.cpp
+    src/TrapAnalysis.cpp
     src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
@@ -219,3 +220,15 @@ add_test(NAME scope_decode_test COMMAND scope_decode_test)
 
 
 
+
+# ── Trap analysis test ────────────────────────────────────────────────────
+# Pure maths: parallel-LC traps synthesised from known L and C, so the
+# recovered f0 and Q are checked against closed-form truth.
+add_executable(trap_analysis_test
+    tests/trap_analysis_test.cpp
+    src/TrapAnalysis.cpp
+)
+target_include_directories(trap_analysis_test PRIVATE src)
+target_link_libraries(trap_analysis_test PRIVATE Qt6::Core)
+set_target_properties(trap_analysis_test PROPERTIES AUTOMOC ON)
+add_test(NAME trap_analysis_test COMMAND trap_analysis_test)

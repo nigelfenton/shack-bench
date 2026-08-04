@@ -26,6 +26,7 @@
 
 #include "CoaxAnalysis.h"
 #include "Scope.h"
+#include "TrapAnalysis.h"
 #include "Instrument.h"
 
 class QComboBox;
@@ -73,6 +74,7 @@ private slots:
     void onScopeCapture();
     void onScopeFinished(const TciMon::ScopeCapture& cap);
     void onScopeProgress(const QString& note);
+    void onTrapSweep();
     void onScopeExportCsv();
     void onScopeExportPng();
 
@@ -81,6 +83,7 @@ private:
     void buildSpectrumTab();
     void buildFeedlineTab();
     void buildScopeTab();
+    void buildTrapTab();
     void log(const QString& line);
     void refreshPlots();
     void setBusy(bool busy);
@@ -139,6 +142,16 @@ private:
     QPushButton*    m_scopeCsv = nullptr;
     QPushButton*    m_scopePng = nullptr;
     ScopeCapture    m_scopeLast;   // the capture on screen, for export
+
+    // --- trap tab (series-through S21 on the NanoVNA) ---
+    QDoubleSpinBox* m_trapFrom = nullptr;
+    QDoubleSpinBox* m_trapTo = nullptr;
+    QDoubleSpinBox* m_trapZ0 = nullptr;
+    QPushButton*    m_trapSweep = nullptr;
+    QLabel*         m_trapStatus = nullptr;
+    QPlainTextEdit* m_trapReport = nullptr;
+    TracePlot*      m_plotTrap = nullptr;
+    bool            m_capturingTrap = false;
 
     // --- shared ---
     QListWidget*    m_library = nullptr;

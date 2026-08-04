@@ -87,6 +87,13 @@ public slots:
     void runNanoVnaSweep(const QString& port, qint64 fromHz, qint64 toHz,
                          int points);
 
+    // NanoVNA S21: the THROUGH path, for characterising a trap in a series
+    // fixture. Reads `data 1` rather than `data 0`.
+    // ⚠ On this unit `data 1` returns 100 points where `data 0` returns 201 —
+    // observed consistently. Pair against the shorter list, never assume.
+    void runNanoVnaS21Sweep(const QString& port, qint64 fromHz, qint64 toHz,
+                            int points);
+
     // tinySA: scanraw/scan -> amplitude in dBm across the span.
     // NOTE the unit in this shack is the ORIGINAL tinySA (Cortex-M0), which
     // CLAMPS SILENTLY at 350 MHz rather than erroring -- the driver reads the

@@ -105,6 +105,7 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
     m_tabs = new QTabWidget();
     buildAntennaTab();
     buildFeedlineTab();
+    buildTrapTab();
     buildSpectrumTab();
     buildScopeTab();
     root->addWidget(m_tabs, 1);
@@ -419,6 +420,111 @@ void InstrumentPanel::onAnalyseCoax()
             .arg(r.assumedVf, 0, 'f', 3)
             .arg(r.meanZ0, 0, 'f', 1)
             .arg(r.verdict));
+}
+
+void InstrumentPanel::buildTrapTab()
+{
+    auto* page = new QWidget();
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(6, 6, 6, 6);
+
+    auto* intro = new QLabel(
+        "Series-through S21 on the NanoVNA: put the trap IN LINE between CH0 "
+        "and CH1. A parallel LC blocks the path at resonance, so the notch "
+        "gives f0, loaded Q, and an estimate of L and C.");
+    intro->setWordWrap(true);
+    intro->setStyleSheet("color:#9fb4cc;");
+    v->addWidget(intro);
+
+    auto* ctl = new QHBoxLayout();
+    ctl->addWidget(new QLabel("Sweep:"));
+    m_trapFrom = new QDoubleSpinBox();
+    m_trapFrom->setRange(0.05, 300.0); m_trapFrom->setDecimals(3);
+    m_trapFrom->setSuffix(" MHz"); m_trapFrom->setValue(3.000);
+    m_trapTo = new QDoubleSpinBox();
+    m_trapTo->setRange(0.05, 300.0); m_trapTo->setDecimals(3);
+    m_trapTo->setSuffix(" MHz"); m_trapTo->setValue(30.000);
+    ctl->addWidget(m_trapFrom);
+    ctl->addWidget(new QLabel("to"));
+    ctl->addWidget(m_trapTo);
+
+    ctl->addWidget(new QLabel("Fixture Z:"));
+    m_trapZ0 = new QDoubleSpinBox();
+    m_trapZ0->setRange(1.0, 600.0); m_trapZ0->setDecimals(1);
+    m_trapZ0->setSuffix(" Ω"); m_trapZ0->setValue(50.0);
+    m_trapZ0->setToolTip("The through impedance the trap is measured in. "
+                         "Affects the L and C estimate only, not f0.");
+    ctl->addWidget(m_trapZ0);
+
+    m_trapSweep = new QPushButton("Sweep trap");
+    connect(m_trapSweep, &QPushButton::clicked, this,
+            &InstrumentPanel::onTrapSweep);
+    ctl->addWidget(m_trapSweep);
+    m_trapStatus = new QLabel("idle");
+    m_trapStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
+    ctl->addWidget(m_trapStatus, 1);
+    v->addLayout(ctl);
+
+    m_plotTrap = new TracePlot();
+    m_plotTrap->setUnit(TracePlot::Unit::Db);
+    m_plotTrap->setTitle("S21 through the trap — the notch is the resonance");
+    m_plotTrap->setPlaceholder(
+        "Fit the trap IN SERIES between CH0 and CH1, then press Sweep trap.\n"
+        "A wide span first (3–30 MHz) finds the notch; narrow it afterwards\n"
+        "for a better Q reading.");
+    connect(m_plotTrap, &TracePlot::cursorMoved,
+            this, &InstrumentPanel::onCursorMoved);
+    v->addWidget(m_plotTrap, 1);
+
+    m_trapReport = new QPlainTextEdit();
+    m_trapReport->setReadOnly(true);
+    m_trapReport->setMaximumHeight(170);
+    m_trapReport->setStyleSheet(
+        "background:#050a14; color:#cfe3ff; font-family:Consolas;");
+    m_trapReport->setPlainText(
+        "Trap bench — series-through S21.\n\n"
+        "  f0 = the notch minimum\n"
+        "  Q  = f0 / (3 dB bandwidth)   [LOADED Q, not unloaded]\n"
+        "  L,C from f0 and Q in the fixture impedance\n\n"
+        "⚠ Without a THROUGH calibration, f0 is still reliable but the notch\n"
+        "  depth includes fixture loss and Q is approximate.");
+    v->addWidget(m_trapReport);
+
+    m_tabs->addTab(page, "Trap");
+}
+
+void InstrumentPanel::onTrapSweep()
+{
+    QString why;
+    if (txInterlockBlocks(&why)) {
+        QMessageBox::warning(this, "Refused — TX is active", why);
+        return;
+    }
+    if (m_busy) return;
+
+    QString port;
+    for (const auto& id : m_found)
+        if (id.kind == InstrumentId::Kind::NanoVna) port = id.port;
+    if (port.isEmpty()) {
+        log("trap: no NanoVNA found — press \"Probe instruments\" first. "
+            "The trap bench needs two ports (S21), so the AA-170 cannot do it.");
+        m_trapStatus->setText("no NanoVNA");
+        return;
+    }
+
+    const qint64 a = qint64(m_trapFrom->value() * 1e6);
+    const qint64 b = qint64(m_trapTo->value() * 1e6);
+    if (b <= a) { log("trap: stop must be above start."); return; }
+
+    m_capturingTrap = true;
+    setBusy(true);
+    m_trapStatus->setText("sweeping…");
+    log(QString("trap: S21 sweep %1–%2 MHz")
+            .arg(a / 1e6, 0, 'f', 3).arg(b / 1e6, 0, 'f', 3));
+    QMetaObject::invokeMethod(m_worker, "runNanoVnaS21Sweep",
+                              Qt::QueuedConnection, Q_ARG(QString, port),
+                              Q_ARG(qint64, a), Q_ARG(qint64, b),
+                              Q_ARG(int, 201));
 }
 
 void InstrumentPanel::buildScopeTab()
@@ -948,6 +1054,87 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
 
     m_live = result;
     m_live.antennaNote = m_antNote->text().trimmed();
+
+    // A trap sweep is S21, not S11 — send it to the trap analysis instead of
+    // the SWR plots.
+    if (m_capturingTrap) {
+        m_capturingTrap = false;
+
+        QVector<TrapPoint> sweep;
+        for (const auto& p : result.points) {
+            TrapPoint tp;
+            tp.mhz = p.hz / 1e6;
+            tp.s21Db = p.dbm;       // the S21 driver stores |S21| dB here
+            sweep << tp;
+        }
+
+        // A THROUGH cal is what makes the depth and Q quantitative. The
+        // instrument reports its cal state; look for a thru term.
+        const bool thru = result.calState.contains("thru", Qt::CaseInsensitive);
+        const TrapResult tr =
+            analyseTrap(sweep, m_trapZ0->value(), thru);
+
+        TracePlot::Trace t;
+        t.label = "S21";
+        t.color = QColor("#7ee787");
+        for (const auto& p : sweep) t.points.insert(qint64(p.mhz * 1e6), p.s21Db);
+        m_plotTrap->setTraces({t});
+        m_plotTrap->setProvenance(
+            QString("%1 · cal \"%2\" · %3")
+                .arg(result.instrument, result.calState, result.takenAtIso));
+
+        QStringList out;
+        if (!tr.ok) {
+            out << "NO RESULT" << ("  " + tr.error);
+            m_trapStatus->setText("no notch found");
+        } else {
+            QVector<TracePlot::Marker> marks;
+            TracePlot::Marker m;
+            m.hz = qint64(tr.f0Mhz * 1e6);
+            m.label = QString("f0 %1").arg(tr.f0Mhz, 0, 'f', 4);
+            m.color = QColor("#ffd866");
+            marks << m;
+            m_plotTrap->setMarkers(marks);
+            m_plotTrap->setTitle(QString("S21 — notch at %1 MHz, %2 dB deep")
+                                     .arg(tr.f0Mhz, 0, 'f', 4)
+                                     .arg(tr.depthDb, 0, 'f', 1));
+
+            out << "TRAP";
+            out << "";
+            out << QString("  resonance f0     %1 MHz").arg(tr.f0Mhz, 0, 'f', 4);
+            out << QString("  notch depth      %1 dB below a %2 dB passband")
+                       .arg(tr.depthDb, 0, 'f', 1).arg(tr.passbandDb, 0, 'f', 1);
+            if (tr.loadedQ > 0) {
+                out << QString("  3 dB bandwidth   %1 MHz")
+                           .arg(tr.bandwidthMhz, 0, 'f', 4);
+                out << QString("  LOADED Q         %1").arg(tr.loadedQ, 0, 'f', 0);
+            }
+            if (tr.inductanceUh > 0)
+                out << QString("  estimated L, C   %1 uH, %2 pF")
+                           .arg(tr.inductanceUh, 0, 'f', 2)
+                           .arg(tr.capacitancePf, 0, 'f', 1);
+            out << "";
+            out << QString("  through cal      %1")
+                       .arg(thru ? "YES — depth and Q are quantitative"
+                                 : "NO — see the caution below");
+            out << "";
+            out << "  ⚠ Q here is LOADED Q: the 50 Ω source and load damp the";
+            out << "    resonance, so it reads lower than the trap's unloaded Q.";
+            out << "    It is the right number for antenna work, but it is NOT";
+            out << "    the figure a coil datasheet quotes.";
+            m_trapStatus->setText(QString("f0 %1 MHz").arg(tr.f0Mhz, 0, 'f', 4));
+        }
+        if (!tr.caution.isEmpty()) {
+            out << "";
+            out << "  ⚠ " + tr.caution;
+        }
+        if (!result.error.isEmpty()) {
+            out << "";
+            out << "  ⚠ " + result.error;
+        }
+        m_trapReport->setPlainText(out.join('\n'));
+        return;
+    }
 
     // If this sweep was armed from the Feedline tab, file it as the open or
     // short half and re-analyse as soon as both are present.
