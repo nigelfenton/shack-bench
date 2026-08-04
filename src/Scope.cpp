@@ -272,12 +272,29 @@ void computeMeasurements(ScopeChannel* ch, double secondsPerSample)
     ch->vmean = sum / v.size();
     ch->vrms = std::sqrt(sumSq / v.size());
 
-    // Frequency by mid-level crossings. Use the MEAN as the threshold with a
-    // hysteresis band, so a noisy flat trace does not produce a confident
-    // nonsense frequency — which is exactly what a naive zero-crossing count
-    // does on an unconnected probe.
-    const double band = std::max(ch->vpp * 0.15, 1e-6);
-    if (ch->vpp < 1e-4 || secondsPerSample <= 0) { ch->freqHz = 0; return; }
+    // Frequency by mid-level crossings about the MEAN, with a hysteresis band,
+    // so a DC offset does not break it.
+    //
+    // ⭐ The "is there a signal at all" test is in DIVISIONS, not volts. A
+    // fixed voltage threshold is meaningless on an instrument whose sensitivity
+    // spans 1 mV/div to 10 V/div: 0.16 V is nothing at 2 V/div and a healthy
+    // trace at 10 mV/div.
+    //
+    // Measured on this scope with an open probe: the entire trace occupied
+    // TWO ADC counts (1695 samples at 4, 304 at 3, one at 5) = 0.08 division.
+    // That is quantisation dither on a flat line, and a naive crossing count
+    // turned it into a confident "259 Hz". The instrument digitises 25 counts
+    // per division, so require at least half a division of swing — 12+ counts
+    // — before believing there is a waveform to measure.
+    constexpr double kMinDivisions = 0.5;
+    const double divisions = (ch->voltsPerDiv > 0)
+                                 ? ch->vpp / ch->voltsPerDiv
+                                 : 0.0;
+    if (divisions < kMinDivisions || secondsPerSample <= 0) {
+        ch->freqHz = 0;
+        return;
+    }
+    const double band = std::max(ch->vpp * 0.15, 1e-9);
 
     const double hi = ch->vmean + band * 0.5;
     const double lo = ch->vmean - band * 0.5;

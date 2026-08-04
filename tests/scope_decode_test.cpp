@@ -67,6 +67,9 @@ int main()
     std::printf("\n=== computed measurements: 1 kHz sine, 2 Vpp ===\n");
     ScopeChannel ch;
     ch.index = 1;
+    // voltsPerDiv matters now: the "is there a signal" gate is in DIVISIONS,
+    // so a channel with no sensitivity set would look like a flat trace.
+    ch.voltsPerDiv = 0.5;                // 2 Vpp = 4 divisions, plainly a signal
     const double fs = 125000.0;          // the scope's actual sample rate
     const double f  = 1000.0;
     for (int i = 0; i < 2000; ++i)
@@ -79,6 +82,7 @@ int main()
 
     std::printf("\n=== a DC offset must not break the frequency ===\n");
     ScopeChannel dc;
+    dc.voltsPerDiv = 0.5;
     for (int i = 0; i < 2000; ++i)
         dc.volts << 3.0 + std::sin(2.0 * kPi * 500.0 * i / fs);
     computeMeasurements(&dc, 1.0 / fs);
@@ -89,13 +93,39 @@ int main()
     std::printf("\n=== a flat trace must NOT report a frequency ===\n");
     // The unconnected-probe case. A naive zero-crossing count on noise
     // invents a confident frequency; this must refuse instead.
+    // ⭐ This is the REAL open-probe capture from the DSO2D15: the whole trace
+    // occupied two ADC counts (0.08 of a division) at 2 V/div, and a naive
+    // crossing count reported a confident 259 Hz.
     ScopeChannel flat;
-    for (int i = 0; i < 2000; ++i)
-        flat.volts << 0.08 + ((i % 7) - 3) * 1e-6;   // dither, no signal
+    flat.voltsPerDiv = 2.0;
+    for (int i = 0; i < 2000; ++i) {
+        const int raw = (i % 7 == 0) ? 3 : 4;        // the measured histogram
+        flat.volts << double(raw) / 25.0 * 2.0 - 0.24;
+    }
     computeMeasurements(&flat, 1.0 / fs);
     check(flat.freqHz == 0.0,
-          "a flat/noisy trace reports NO frequency rather than a made-up one");
-    near(flat.vpp, 0.0, 1e-3, "and its Vpp is ~0");
+          "two counts of dither at 2 V/div reports NO frequency (was 259 Hz)");
+    near(flat.vpp, 0.08, 0.01, "its Vpp is 2 counts = 0.08 V");
+
+    std::printf("\n=== the SAME swing IS a signal at high sensitivity ===\n");
+    // 0.08 V is nothing at 2 V/div but four divisions at 20 mV/div. The gate
+    // must scale with the instrument, not with an absolute voltage.
+    ScopeChannel sensitive;
+    sensitive.voltsPerDiv = 0.02;
+    for (int i = 0; i < 2000; ++i)
+        sensitive.volts << 0.04 * std::sin(2.0 * kPi * 250.0 * i / fs);
+    computeMeasurements(&sensitive, 1.0 / fs);
+    near(sensitive.freqHz, 250.0, 8.0,
+         "an 80 mVpp sine at 20 mV/div IS measured (4 divisions)");
+
+    std::printf("\n=== just under the gate is refused ===\n");
+    ScopeChannel marginal;
+    marginal.voltsPerDiv = 1.0;
+    for (int i = 0; i < 2000; ++i)
+        marginal.volts << 0.2 * std::sin(2.0 * kPi * 250.0 * i / fs);  // 0.4 div
+    computeMeasurements(&marginal, 1.0 / fs);
+    check(marginal.freqHz == 0.0,
+          "0.4 division of swing is below the half-division gate");
 
     std::printf("\n=== degenerate input is handled, not crashed on ===\n");
     const QVector<double> none = decodeChannel(QByteArray(), 1, 2, 1.0, 0.0);
