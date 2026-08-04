@@ -101,10 +101,15 @@ public slots:
     void runTinySaSweep(const QString& port, qint64 fromHz, qint64 toHz,
                         int points);
 
+    // Run one raw instrument command and report the reply — used by the
+    // guided calibration so the operator never has to type SCPI.
+    void runRawCommand(const QString& port, const QString& command);
+
     void cancel() { m_cancel = true; }
 
 signals:
     void progress(int done, int total, const QString& note);
+    void rawCommandDone(bool ok, const QString& reply);
     void finished(const TciMon::SweepResult& result);
 
 private:

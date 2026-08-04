@@ -1,6 +1,7 @@
 #include "InstrumentPanel.h"
 
 #include "TciClient.h"
+#include "GuidePanel.h"
 #include "TracePlot.h"
 
 #include <QApplication>
@@ -122,6 +123,7 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
     connect(m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     connect(m_worker, &SweepWorker::progress, this, &InstrumentPanel::onSweepProgress);
     connect(m_worker, &SweepWorker::finished, this, &InstrumentPanel::onSweepFinished);
+    connect(m_worker, &SweepWorker::rawCommandDone, this, &InstrumentPanel::onRawCommandDone);
     m_thread->start();
 
     log("Bench instruments. Press \"Probe instruments\" to see what is attached.");
@@ -525,6 +527,55 @@ void InstrumentPanel::onTrapSweep()
                               Qt::QueuedConnection, Q_ARG(QString, port),
                               Q_ARG(qint64, a), Q_ARG(qint64, b),
                               Q_ARG(int, 201));
+}
+
+void InstrumentPanel::onShowCalGuide()
+{
+    m_guide->setGuide(calibrationGuide());
+    log("guide: calibration walkthrough — the THROUGH step is what makes S21 "
+        "quantitative.");
+}
+
+void InstrumentPanel::onShowTrapGuide()
+{
+    m_guide->setGuide(trapGuide());
+}
+
+void InstrumentPanel::onGuideCommand(const QString& command,
+                                     const QString& stepTitle)
+{
+    QString port;
+    for (const auto& id : m_found)
+        if (id.kind == InstrumentId::Kind::NanoVna) port = id.port;
+    if (port.isEmpty()) {
+        m_guide->commandFinished(
+            false, "no NanoVNA found — press \"Probe instruments\" first");
+        return;
+    }
+
+    // The verification step is a measurement, not a command: sweep the fitted
+    // load and check it reads 50 ohm. Route it through the normal sweep path.
+    if (command == "__verify_load") {
+        m_verifyingCal = true;
+        log("guide: verifying the calibration against the fitted 50 Ω load…");
+        QMetaObject::invokeMethod(m_worker, "runNanoVnaSweep",
+                                  Qt::QueuedConnection, Q_ARG(QString, port),
+                                  Q_ARG(qint64, 3000000), Q_ARG(qint64, 30000000),
+                                  Q_ARG(int, 201));
+        return;
+    }
+
+    log(QString("guide: %1 → %2").arg(stepTitle, command));
+    QMetaObject::invokeMethod(m_worker, "runRawCommand", Qt::QueuedConnection,
+                              Q_ARG(QString, port), Q_ARG(QString, command));
+}
+
+void InstrumentPanel::onRawCommandDone(bool ok, const QString& reply)
+{
+    if (m_guide) m_guide->commandFinished(ok, reply);
+    log(QString("guide: %1%2").arg(ok ? "ok" : "FAILED",
+                                   reply.isEmpty() ? QString()
+                                                   : " — " + reply));
 }
 
 void InstrumentPanel::buildScopeTab()
@@ -1054,6 +1105,36 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
 
     m_live = result;
     m_live.antennaNote = m_antNote->text().trimmed();
+
+    // The calibration guide's verification sweep: measure the fitted 50 ohm
+    // load and judge the cal against what it MUST read.
+    if (m_verifyingCal) {
+        m_verifyingCal = false;
+        double rMin = 1e9, rMax = -1e9, xWorst = 0, sMax = 0;
+        int impossible = 0;
+        for (const auto& p : result.points) {
+            rMin = std::min(rMin, p.r);
+            rMax = std::max(rMax, p.r);
+            xWorst = std::max(xWorst, std::abs(p.x));
+            if (std::isfinite(p.swr)) sMax = std::max(sMax, p.swr);
+            if (p.r < 0 || !std::isfinite(p.swr)) ++impossible;
+        }
+        const bool good = result.ok && !result.points.isEmpty() &&
+                          rMin > 49.0 && rMax < 51.0 && xWorst < 1.0 &&
+                          sMax < 1.05 && impossible == 0;
+        const QString verdict =
+            result.points.isEmpty()
+                ? QString("no data came back — is the load fitted?")
+                : QString("R %1–%2 Ω, |X| ≤ %3 Ω, SWR ≤ %4, %5 impossible "
+                          "point(s) — %6")
+                      .arg(rMin, 0, 'f', 2).arg(rMax, 0, 'f', 2)
+                      .arg(xWorst, 0, 'f', 2).arg(sMax, 0, 'f', 4)
+                      .arg(impossible)
+                      .arg(good ? "CAL GOOD" : "CAL SUSPECT — redo it");
+        if (m_guide) m_guide->commandFinished(good, verdict);
+        log("guide: " + verdict);
+        return;
+    }
 
     // A trap sweep is S21, not S11 — send it to the trap analysis instead of
     // the SWR plots.

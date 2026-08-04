@@ -26,6 +26,7 @@
 
 #include "CoaxAnalysis.h"
 #include "Scope.h"
+#include "GuidePanel.h"
 #include "TrapAnalysis.h"
 #include "Instrument.h"
 
@@ -75,6 +76,10 @@ private slots:
     void onScopeFinished(const TciMon::ScopeCapture& cap);
     void onScopeProgress(const QString& note);
     void onTrapSweep();
+    void onGuideCommand(const QString& command, const QString& stepTitle);
+    void onRawCommandDone(bool ok, const QString& reply);
+    void onShowCalGuide();
+    void onShowTrapGuide();
     void onScopeExportCsv();
     void onScopeExportPng();
 
@@ -152,6 +157,8 @@ private:
     QPlainTextEdit* m_trapReport = nullptr;
     TracePlot*      m_plotTrap = nullptr;
     bool            m_capturingTrap = false;
+    GuidePanel*     m_guide = nullptr;
+    bool            m_verifyingCal = false;
 
     // --- shared ---
     QListWidget*    m_library = nullptr;

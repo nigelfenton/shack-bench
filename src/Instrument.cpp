@@ -364,6 +364,26 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     emit finished(res);
 }
 
+void SweepWorker::runRawCommand(const QString& port, const QString& cmd)
+{
+    QSerialPort sp;
+    QString err;
+    if (!openPort(sp, port, 115200, &err)) {
+        emit rawCommandDone(false, err);
+        return;
+    }
+    // A cal step needs the sweep to have SETTLED on the newly-fitted standard
+    // before it is captured. `cal load` reported success here once while the
+    // sweep was still on the previous standard, and the result read tens of
+    // kilohms on a 50 ohm load. Wait before capturing, not after.
+    if (cmd.startsWith("cal ") && cmd != "cal reset")
+        QThread::msleep(2500);
+
+    const QStringList reply = command(sp, cmd, 8000, 1200);
+    sp.close();
+    emit rawCommandDone(true, reply.join(" | ").left(140));
+}
+
 void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
                                      qint64 toHz, int points)
 {

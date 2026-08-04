@@ -99,6 +99,7 @@ set(TCIMON_SOURCES
     src/CoaxAnalysis.cpp
     src/Scope.cpp
     src/TrapAnalysis.cpp
+    src/GuidePanel.cpp
     src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
