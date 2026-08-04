@@ -73,6 +73,8 @@ private slots:
     void onScopeCapture();
     void onScopeFinished(const TciMon::ScopeCapture& cap);
     void onScopeProgress(const QString& note);
+    void onScopeExportCsv();
+    void onScopeExportPng();
 
 private:
     void buildAntennaTab();
@@ -134,6 +136,9 @@ private:
     QThread*        m_scopeThread = nullptr;
     ScopeWorker*    m_scopeWorker = nullptr;
     QString         m_scopeResource;
+    QPushButton*    m_scopeCsv = nullptr;
+    QPushButton*    m_scopePng = nullptr;
+    ScopeCapture    m_scopeLast;   // the capture on screen, for export
 
     // --- shared ---
     QListWidget*    m_library = nullptr;

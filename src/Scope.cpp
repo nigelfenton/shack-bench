@@ -46,7 +46,13 @@ struct Visa {
     QString detail;
 };
 
-constexpr quint32 kAttrTmoValue = 0x3FFF001A;
+constexpr quint32 kAttrTmoValue   = 0x3FFF001A;   // VI_ATTR_TMO_VALUE
+// ⚠ VI_ATTR_TERMCHAR_EN makes viRead STOP at a terminator byte. The waveform
+// is BINARY, so a sample that happens to equal the termchar truncates the
+// transfer mid-block — which is exactly how a 4128-byte reply arrived as 11
+// bytes while pyvisa (which disables this for read_raw) got the lot. Must be
+// off before fetching a binary block.
+constexpr quint32 kAttrTermcharEn = 0x3FFF0038;   // VI_ATTR_TERMCHAR_EN
 
 Visa& visa()
 {
@@ -98,6 +104,14 @@ public:
         if (m_inst && visa().setAttr) visa().setAttr(m_inst, kAttrTmoValue, ms);
     }
 
+    // Turn the terminator-character stop off for binary transfers, on for the
+    // ASCII queries where it usefully ends a reply at the newline.
+    void setTermcharEnabled(bool on)
+    {
+        if (m_inst && visa().setAttr)
+            visa().setAttr(m_inst, kAttrTermcharEn, on ? 1 : 0);
+    }
+
     bool writeLine(const QString& cmd)
     {
         if (!m_inst) return false;
@@ -106,6 +120,8 @@ public:
         return visa().write(m_inst, (const uchar*)b.constData(),
                             quint32(b.size()), &n) >= 0;
     }
+
+    ViStatus lastStatus() const { return m_lastStatus; }
 
     QByteArray readRaw(int cap = 8 * 1024 * 1024)
     {
@@ -124,6 +140,7 @@ public:
             quint32 n = 0;
             const ViStatus st = visa().read(m_inst, (uchar*)chunk.data(),
                                             quint32(chunk.size()), &n);
+            m_lastStatus = st;
             if (n > 0) out.append(chunk.constData(), int(n));
             if (st != kMaxCnt) break;      // ended, or errored
         }
@@ -172,6 +189,7 @@ private:
             return;
         }
         setTimeout(6000);
+        setTermcharEnabled(true);          // ASCII queries end at the newline
         // ⭐ The first query after connect usually errors. Burn one.
         writeLine("*IDN?");
         readRaw(4096);
@@ -181,6 +199,7 @@ private:
     ViSession m_rm = 0;
     ViSession m_inst = 0;
     QString m_err;
+    ViStatus m_lastStatus = 0;
 };
 
 } // namespace
@@ -361,30 +380,52 @@ void ScopeWorker::capture(const QString& resource)
 
     emit progress("fetching waveform");
     s.setTimeout(20000);
-    if (!s.writeLine("PRIVate:WAVeform:DATA:ALL?")) {
-        out.error = "the waveform request was refused";
+    s.setTermcharEnabled(false);           // the block that follows is BINARY
+
+    // ⭐ The scope legitimately answers "#9000000000" — a block of length ZERO —
+    // when it has nothing ready yet, and expects to be asked again. That is the
+    // real reason a capture came back as "11 bytes": not a truncated transfer,
+    // but an empty one. The reference toolkit loops on the same condition.
+    // Retry a few times before declaring failure.
+    QByteArray buf;
+    int declared = 0;
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        if (!s.writeLine("PRIVate:WAVeform:DATA:ALL?")) {
+            out.error = "the waveform request was refused";
+            emit finished(out);
+            return;
+        }
+        buf = s.readRaw();
+        if (buf.size() >= 11 && buf.at(0) == '#' && buf.at(1) == '9') {
+            declared = buf.mid(2, 9).toInt();
+            if (declared > 0) break;       // real data on the way
+        }
+        // Nothing yet — give the acquisition a moment and ask again.
+        QThread::msleep(250);
+        emit progress(QString("waiting for the scope to fill (%1)")
+                          .arg(attempt + 1));
+    }
+    if (declared <= 0) {
+        out.error = "the scope returned an empty waveform block ten times "
+                    "(#9000000000). It may be stopped or not triggering — "
+                    "press Run on the scope, or set the trigger to AUTO.";
         emit finished(out);
         return;
     }
-    // ⚠ The scope sometimes returns the "#9<9-digit length>" header as its own
-    // short transfer, ending with VI_SUCCESS, and sends the payload on the
-    // NEXT read. A single readRaw() therefore comes back with just 11 bytes.
-    // Keep reading until the declared block length has actually arrived.
-    QByteArray buf = s.readRaw();
-    if (buf.size() >= 11 && buf.at(0) == '#' && buf.at(1) == '9') {
-        bool okLen = false;
-        const int declared = buf.mid(2, 9).toInt(&okLen);
-        for (int guard = 0; okLen && guard < 64 && buf.size() < 11 + declared;
-             ++guard) {
-            const QByteArray more = s.readRaw();
-            if (more.isEmpty()) break;
-            buf += more;
-        }
+    // Keep reading until the declared block has actually arrived; a large
+    // capture spans several transfers.
+    for (int guard = 0; guard < 200 && buf.size() < 11 + declared; ++guard) {
+        const QByteArray more = s.readRaw();
+        if (more.isEmpty()) break;
+        buf += more;
     }
     if (buf.size() < 129 || buf.at(0) != '#' || buf.at(1) != '9') {
-        out.error = QString("unexpected waveform reply (%1 bytes, header %2)")
+        out.error = QString("unexpected waveform reply: %1 bytes, header '%2', "
+                            "declared %3, viRead status 0x%4")
                         .arg(buf.size())
-                        .arg(QString::fromLatin1(buf.left(2)));
+                        .arg(QString::fromLatin1(buf.left(2)))
+                        .arg(buf.size() >= 11 ? buf.mid(2, 9) : QByteArray("?"))
+                        .arg(quint32(s.lastStatus()), 8, 16, QChar('0'));
         emit finished(out);
         return;
     }

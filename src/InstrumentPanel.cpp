@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -14,6 +15,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
@@ -433,6 +435,20 @@ void InstrumentPanel::buildScopeTab()
     m_scopeStatus->setWordWrap(true);
     m_scopeStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
     ctl->addWidget(m_scopeStatus, 1);
+
+    // Export stays disabled until there is something real to write, so the
+    // buttons can never produce an empty or stale file.
+    m_scopeCsv = new QPushButton("Export CSV");
+    m_scopeCsv->setEnabled(false);
+    connect(m_scopeCsv, &QPushButton::clicked,
+            this, &InstrumentPanel::onScopeExportCsv);
+    ctl->addWidget(m_scopeCsv);
+
+    m_scopePng = new QPushButton("Save PNG");
+    m_scopePng->setEnabled(false);
+    connect(m_scopePng, &QPushButton::clicked,
+            this, &InstrumentPanel::onScopeExportPng);
+    ctl->addWidget(m_scopePng);
     v->addLayout(ctl);
 
     m_plotScope = new TracePlot();
@@ -560,8 +576,113 @@ void InstrumentPanel::onScopeFinished(const TciMon::ScopeCapture& cap)
     t << "    A flat trace reports no frequency rather than inventing one.";
     m_scopeReport->setPlainText(t.join('\n'));
 
+    m_scopeLast = cap;
+    m_scopeCsv->setEnabled(true);
+    m_scopePng->setEnabled(true);
+
     m_scopeStatus->setText(QString("captured %1").arg(cap.takenAtIso));
     log(QString("scope: captured %1 channel(s)").arg(traces.size()));
+}
+
+void InstrumentPanel::onScopeExportCsv()
+{
+    if (!m_scopeLast.ok) { log("scope: nothing to export."); return; }
+
+    const QString stamp =
+        QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+    const QString path = QFileDialog::getSaveFileName(
+        this, "Export scope capture",
+        QString("scope-%1.csv").arg(stamp), "CSV (*.csv)");
+    if (path.isEmpty()) return;
+
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        log("scope: cannot write " + path);
+        return;
+    }
+    QTextStream ts(&f);
+
+    // Provenance travels WITH the data, as it does for the sweep exports. A
+    // column of volts with no record of the instrument, the timebase or the
+    // per-channel sensitivity cannot be checked later, and an unverifiable
+    // capture is one that gets believed anyway.
+    const ScopeCapture& c = m_scopeLast;
+    ts << "# " << c.idn << "\n";
+    ts << "# taken " << c.takenAtIso << "\n";
+    ts << "# " << c.secondsPerDiv << " s/div, " << c.sampleRateHz
+       << " Sa/s, " << c.pointsRequested << " points requested\n";
+    ts << "# trigger " << c.triggerMode << " / " << c.triggerSweep << "\n";
+    for (const auto& ch : c.channels) {
+        if (!ch.enabled) continue;
+        ts << "# CH" << ch.index << ": " << ch.voltsPerDiv << " V/div, offset "
+           << ch.offsetV << " V, probe x" << ch.probe << ", " << ch.coupling
+           << "\n";
+        ts << "#   Vpp " << QString::number(ch.vpp, 'f', 4)
+           << "  Vrms " << QString::number(ch.vrms, 'f', 4)
+           << "  Vmean " << QString::number(ch.vmean, 'f', 4)
+           << "  Vmin " << QString::number(ch.vmin, 'f', 4)
+           << "  Vmax " << QString::number(ch.vmax, 'f', 4)
+           << "  freq "
+           << (ch.freqHz > 0 ? QString::number(ch.freqHz, 'f', 2) + " Hz"
+                             : QString("(none — under half a division)"))
+           << "\n";
+    }
+    ts << "# NOTE: Vpp/Vrms/Vmean/freq are COMPUTED from these samples.\n";
+    ts << "#       Firmware 3.0.1 implements no :MEASure: value queries, so\n";
+    ts << "#       they are this program's numbers, not the scope's readout.\n";
+
+    // One row per sample instant, one column per enabled channel.
+    QVector<const ScopeChannel*> live;
+    for (const auto& ch : c.channels)
+        if (ch.enabled && !ch.volts.isEmpty()) live << &ch;
+    if (live.isEmpty()) {
+        ts << "# no channel produced samples\n";
+        f.close();
+        log("scope: exported header only — no samples");
+        return;
+    }
+
+    ts << "time_s";
+    for (const auto* ch : live) ts << ",ch" << ch->index << "_volts";
+    ts << "\n";
+
+    int n = 0;
+    for (const auto* ch : live) n = std::max(n, int(ch->volts.size()));
+    const double dt = c.secondsPerSample();
+    for (int i = 0; i < n; ++i) {
+        ts << QString::number(i * dt, 'e', 9);
+        for (const auto* ch : live) {
+            ts << ',';
+            if (i < ch->volts.size())
+                ts << QString::number(ch->volts[i], 'f', 6);
+        }
+        ts << "\n";
+    }
+    f.close();
+    log(QString("scope: exported %1 samples to %2").arg(n).arg(path));
+}
+
+void InstrumentPanel::onScopeExportPng()
+{
+    if (!m_scopeLast.ok || !m_plotScope) { log("scope: nothing to save."); return; }
+    const QString stamp =
+        QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+    const QString path = QFileDialog::getSaveFileName(
+        this, "Save waveform image",
+        QString("scope-%1.png").arg(stamp), "PNG (*.png)");
+    if (path.isEmpty()) return;
+
+    // Render at 2x so the image is legible when it ends up in a report or a
+    // forum post rather than back on this screen.
+    const qreal scale = 2.0;
+    QPixmap pm(m_plotScope->size() * scale);
+    pm.setDevicePixelRatio(scale);
+    pm.fill(QColor("#050a14"));
+    m_plotScope->render(&pm);
+    if (pm.save(path, "PNG"))
+        log("scope: saved " + path);
+    else
+        log("scope: could not write " + path);
 }
 
 void InstrumentPanel::buildSpectrumTab()
