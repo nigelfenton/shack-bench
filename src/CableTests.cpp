@@ -51,9 +51,32 @@ VfResult measureVelocityFactor(
         r.crossingsMhz << (den > 0 ? f0 + (f1 - f0) * std::abs(x0) / den : f0);
     }
 
+    // ⚠ The NanoVNA returns EXACT zeros outside its stored calibration —
+    // R = 50.000, X = 0.000, |gamma| = 0.0000 to four decimals. That is not a
+    // measurement, it is the absence of one, and it silently contributes fake
+    // "crossings". Detect and reject those points before counting anything.
+    int exactZeros = 0;
+    for (const auto& p : freqMhzAndX)
+        if (p.second == 0.0) ++exactZeros;
+    if (exactZeros > freqMhzAndX.size() / 4) {
+        r.error = QString("%1 of %2 points read exactly X = 0.000, which is "
+                          "the instrument reporting NO DATA rather than a "
+                          "measurement. The sweep has gone outside the "
+                          "calibrated range — recalibrate over the span you "
+                          "want to sweep, or narrow the sweep to the "
+                          "calibrated one.")
+                      .arg(exactZeros).arg(freqMhzAndX.size());
+        return r;
+    }
+
     if (r.crossingsMhz.size() < 2) {
-        r.error = QString("only %1 resonance(s) in this sweep — a short cable "
-                          "needs a WIDE span to show several. Try 1–300 MHz.")
+        r.error = QString("only %1 resonance(s) in this sweep. Crossings occur "
+                          "every quarter wavelength, so a SHORT cable needs a "
+                          "HIGH sweep — but the instrument only returns real "
+                          "data inside its calibration. Either calibrate "
+                          "higher, or use a LONGER piece of the same cable: "
+                          "roughly 400 in gives 5 crossings in 3–30 MHz, "
+                          "1200 in gives 16.")
                       .arg(r.crossingsMhz.size());
         return r;
     }

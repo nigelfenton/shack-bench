@@ -580,6 +580,21 @@ void InstrumentPanel::buildCableTab()
         "Connector shoulder to connector shoulder. The result is only as good "
         "as this measurement — a 10% length error is a 10% VF error.");
     vfl->addWidget(m_vfLengthIn);
+    vfl->addWidget(new QLabel("Sweep:"));
+    m_vfFromMhz = new QDoubleSpinBox();
+    m_vfFromMhz->setRange(0.05, 300.0); m_vfFromMhz->setDecimals(3);
+    m_vfFromMhz->setSuffix(" MHz"); m_vfFromMhz->setValue(3.000);
+    m_vfToMhz = new QDoubleSpinBox();
+    m_vfToMhz->setRange(0.05, 300.0); m_vfToMhz->setDecimals(3);
+    m_vfToMhz->setSuffix(" MHz"); m_vfToMhz->setValue(30.000);
+    m_vfFromMhz->setToolTip(
+        "Must be INSIDE the calibrated span. Outside it this instrument "
+        "returns exact zeros, which are not measurements.");
+    m_vfToMhz->setToolTip(m_vfFromMhz->toolTip());
+    vfl->addWidget(m_vfFromMhz);
+    vfl->addWidget(new QLabel("to"));
+    vfl->addWidget(m_vfToMhz);
+
     m_vfMeasure = new QPushButton("Measure VF (far end SHORTED)");
     connect(m_vfMeasure, &QPushButton::clicked, this,
             &InstrumentPanel::onMeasureVf);
@@ -693,13 +708,26 @@ void InstrumentPanel::onMeasureVf()
     }
     m_capturingVf = true;
     setBusy(true);
-    // Wide span on purpose: a short jumper resonates high, and one crossing
-    // cannot be averaged. See the guide.
-    log("cable: VF sweep 1–300 MHz (wide, so a short cable shows several "
-        "resonances)");
+    // ⚠ Sweep the CALIBRATED span, not a wider one.
+    //
+    // An earlier version swept 1-300 MHz to catch more crossings, on the
+    // reasoning that crossings are frequencies and frequency is unaffected by
+    // calibration. That was wrong in practice: this NanoVNA returns EXACT
+    // zeros — R 50.000, X 0.000, |gamma| 0.0000 — for every point outside its
+    // stored cal, and the last real sample was 29.9 MHz however wide the sweep
+    // was requested. The extra "crossings" were fabricated by that dead data.
+    //
+    // So sweep only where the instrument can actually measure. If that yields
+    // too few crossings for the cable in hand, the analysis says so and names
+    // the two real remedies: calibrate higher, or use a longer offcut.
+    const qint64 from = qint64(m_vfFromMhz->value() * 1e6);
+    const qint64 to   = qint64(m_vfToMhz->value() * 1e6);
+    log(QString("cable: VF sweep %1–%2 MHz — this must be INSIDE the "
+                "calibrated span or the data is not real")
+            .arg(from / 1e6, 0, 'f', 3).arg(to / 1e6, 0, 'f', 3));
     QMetaObject::invokeMethod(m_worker, "runNanoVnaSweep", Qt::QueuedConnection,
-                              Q_ARG(QString, port), Q_ARG(qint64, 1000000),
-                              Q_ARG(qint64, 300000000), Q_ARG(int, 201));
+                              Q_ARG(QString, port), Q_ARG(qint64, from),
+                              Q_ARG(qint64, to), Q_ARG(int, 201));
 }
 
 void InstrumentPanel::onMeasureChoke()

@@ -98,6 +98,39 @@ int main()
     check(!daft.ok && daft.error.contains("sensible"),
           "a physically impossible VF is refused, not reported");
 
+    std::printf("\n=== the dead-data trap: exact zeros are NOT measurements ===\n");
+    // ⭐ Measured on the real NanoVNA on 2026-08-03: outside its stored
+    // calibration it returns R 50.000, X 0.000, |gamma| 0.0000 to four
+    // decimals for EVERY point, and the last real sample was 29.9 MHz however
+    // wide the sweep was requested. Those exact zeros fabricate crossings, so
+    // a 1-300 MHz sweep of a real cable is live to 30 MHz and dead after.
+    QVector<QPair<double, double>> dead =
+        shortedLine(metres, 0.66, 1.0, 30.0, 40);
+    for (int i = 0; i < 161; ++i)
+        dead << qMakePair(30.0 + 270.0 * i / 160.0, 0.0);
+    VfResult dz = measureVelocityFactor(dead, metres);
+    check(!dz.ok, "a sweep that is mostly exact zeros is REFUSED");
+    check(dz.error.contains("NO DATA") || dz.error.contains("calibrat"),
+          "and the error names the cause: outside the calibrated range");
+    std::printf("       %s\n", dz.error.toLocal8Bit().constData());
+
+    std::printf("\n=== a short cable in a narrow window fails helpfully ===\n");
+    VfResult few = measureVelocityFactor(
+        shortedLine(metres, 0.66, 3.0, 30.0, 201), metres);
+    check(!few.ok, "97 in over 3-30 MHz gives too few crossings");
+    check(few.error.contains("LONGER") || few.error.contains("calibrate"),
+          "and names BOTH remedies: calibrate higher, or use a longer offcut");
+    std::printf("       %s\n", few.error.toLocal8Bit().constData());
+
+    std::printf("\n=== a longer offcut works in the SAME calibrated window ===\n");
+    const double longM = 400.0 * 0.0254;
+    VfResult lng = measureVelocityFactor(
+        shortedLine(longM, 0.66, 3.0, 30.0, 401), longM);
+    check(lng.ok, "400 in analyses inside 3-30 MHz");
+    near(lng.velocityFactor, 0.66, 0.02, "and recovers VF 0.66");
+    std::printf("       %lld crossings from the longer piece\n",
+                (long long)lng.crossingsMhz.size());
+
     std::printf("\n=== choke: a good HF choke (5 kohm across HF) ===\n");
     QVector<QPair<double, double>> good;
     for (int i = 0; i < 200; ++i) {

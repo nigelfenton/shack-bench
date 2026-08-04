@@ -167,6 +167,8 @@ private:
 
     // --- cable tab (velocity factor + common-mode choke) ---
     QDoubleSpinBox* m_vfLengthIn = nullptr;
+    QDoubleSpinBox* m_vfFromMhz = nullptr;
+    QDoubleSpinBox* m_vfToMhz = nullptr;
     QPushButton*    m_vfMeasure = nullptr;
     QDoubleSpinBox* m_chokeThreshold = nullptr;
     QPushButton*    m_chokeMeasure = nullptr;

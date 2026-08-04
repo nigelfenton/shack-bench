@@ -314,23 +314,32 @@ const Guide& velocityFactorGuide()
         guide.steps << s;
 
         s = {};
-        s.title = "Sweep WIDE — this is the important bit";
+        s.title = "Length and sweep range must suit each other";
         s.body =
-            "<p>A short cable resonates high. A 97-inch jumper has its first "
-            "crossing around <b>20–26 MHz</b>, so a 3–30 MHz sweep catches only "
-            "one — and one crossing cannot be averaged.</p>"
-            "<p>Sweep <b>1–300 MHz</b> instead. That same jumper then shows "
-            "about <b>14 crossings</b>, and averaging them makes the answer far "
-            "less sensitive to any single interpolated point.</p>"
-            "<p>⚠ <b>That span is outside your 3–30 MHz calibration.</b> For "
-            "this particular measurement that is acceptable — the crossings are "
-            "<i>frequencies</i>, and frequency is not affected by calibration "
-            "the way magnitude is. But do not read anything into the impedance "
-            "values from this sweep.</p>";
-        s.action = "Set 1–300 MHz, 201 points";
-        s.command = "sweep 1000000 300000000 201";
-        s.verify = "sweep";
-        s.expect = "1000000 300000000";
+            "<p>Crossings occur every <b>quarter wavelength</b>, so a short "
+            "cable resonates high and a long one low. You need at least a few "
+            "crossings inside the sweep to average.</p>"
+            "<p>In a 3–30 MHz window, at VF 0.66:</p>"
+            "<ul>"
+            "<li><b>97 in</b> — about <b>1</b> crossing. Not enough.</li>"
+            "<li><b>400 in</b> — about 5 crossings.</li>"
+            "<li><b>1200 in</b> — about 16 crossings.</li>"
+            "</ul>"
+            "<p>⛔ <b>Do not simply sweep wider to get more.</b> An earlier "
+            "version of this guide said to sweep 1–300 MHz on exactly that "
+            "reasoning, and it was wrong. This NanoVNA returns <b>exact "
+            "zeros</b> — R 50.000, X 0.000, |Γ| 0.0000 — for every point "
+            "outside its stored calibration. Measured here: however wide the "
+            "sweep was requested, <b>the last real sample was 29.9 MHz</b>. "
+            "The extra crossings were fabricated by that dead data.</p>"
+            "<p>So there are two honest options:</p>"
+            "<p><b>Use a longer offcut</b> of the same cable — a few metres "
+            "gives plenty of crossings inside 3–30 MHz. Simplest.</p>"
+            "<p><b>Or calibrate higher</b> — run the calibration guide over, "
+            "say, 1–150 MHz, and then a short jumper works. More setup, but it "
+            "makes short pieces measurable.</p>"
+            "<p>The panel rejects a sweep that is mostly exact zeros rather "
+            "than turning it into a number.</p>";
         guide.steps << s;
 
         s = {};
@@ -348,16 +357,20 @@ const Guide& velocityFactorGuide()
         guide.steps << s;
 
         s = {};
-        s.title = "Afterwards — put the range back";
+        s.title = "Sanity-check the answer";
         s.body =
-            "<p>The sweep is now 1–300 MHz, which is outside your calibration. "
-            "Set it back to the calibrated span before doing any antenna or "
-            "feedline work, or those measurements will be interpolated and "
-            "unreliable.</p>";
+            "<p>Real coax is <b>0.66 to 0.88</b>. Anything outside that means "
+            "the length is wrong, the far end is not shorted, or the sweep "
+            "strayed outside the calibration. The panel refuses such results "
+            "rather than reporting them.</p>"
+            "<p>Compare against the nearest catalogue entry the panel names. If "
+            "you measure 0.84 on cable you believed was RG-213, believe the "
+            "measurement — that is the whole point of doing it.</p>"
+            "<p>If you did recalibrate to a wider span for a short offcut, set "
+            "the sweep back to your normal working range before returning to "
+            "antenna or feedline work.</p>";
         s.action = "Restore 3–30 MHz, 201 points";
         s.command = "sweep 3000000 30000000 201";
-        s.verify = "sweep";
-        s.expect = "3000000 30000000";
         guide.steps << s;
 
         return guide;
