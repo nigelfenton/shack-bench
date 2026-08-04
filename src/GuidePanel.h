@@ -48,6 +48,8 @@ struct Guide {
 // UI code, and so a third guide is a table entry rather than a new widget.
 const Guide& calibrationGuide();
 const Guide& trapGuide();
+const Guide& velocityFactorGuide();
+const Guide& chokeGuide();
 
 class GuidePanel : public QWidget {
     Q_OBJECT

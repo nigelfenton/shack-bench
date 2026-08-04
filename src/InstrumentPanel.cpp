@@ -107,6 +107,7 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
     buildAntennaTab();
     buildFeedlineTab();
     buildTrapTab();
+    buildCableTab();
     buildSpectrumTab();
     buildScopeTab();
     root->addWidget(m_tabs, 1);
@@ -557,6 +558,172 @@ void InstrumentPanel::onTrapSweep()
     QMetaObject::invokeMethod(m_worker, "runNanoVnaS21Sweep",
                               Qt::QueuedConnection, Q_ARG(QString, port),
                               Q_ARG(qint64, a), Q_ARG(qint64, b),
+                              Q_ARG(int, 201));
+}
+
+void InstrumentPanel::buildCableTab()
+{
+    auto* page = new QWidget();
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(6, 6, 6, 6);
+
+    // --- velocity factor ---
+    auto* vfBox = new QGroupBox("Velocity factor — from a known length");
+    auto* vfl = new QHBoxLayout(vfBox);
+    vfl->addWidget(new QLabel("Physical length:"));
+    m_vfLengthIn = new QDoubleSpinBox();
+    m_vfLengthIn->setRange(1.0, 5000.0);
+    m_vfLengthIn->setDecimals(2);
+    m_vfLengthIn->setSuffix(" in");
+    m_vfLengthIn->setValue(97.0);          // Nigel's RG-8/U jumper
+    m_vfLengthIn->setToolTip(
+        "Connector shoulder to connector shoulder. The result is only as good "
+        "as this measurement — a 10% length error is a 10% VF error.");
+    vfl->addWidget(m_vfLengthIn);
+    m_vfMeasure = new QPushButton("Measure VF (far end SHORTED)");
+    connect(m_vfMeasure, &QPushButton::clicked, this,
+            &InstrumentPanel::onMeasureVf);
+    vfl->addWidget(m_vfMeasure);
+    vfl->addStretch();
+    v->addWidget(vfBox);
+
+    // --- common-mode choke ---
+    auto* chBox = new QGroupBox("Common-mode choke — G3TXQ fixture, CH0–CH1");
+    auto* chl = new QHBoxLayout(chBox);
+    chl->addWidget(new QLabel("Pass above:"));
+    m_chokeThreshold = new QDoubleSpinBox();
+    m_chokeThreshold->setRange(100.0, 20000.0);
+    m_chokeThreshold->setDecimals(0);
+    m_chokeThreshold->setSingleStep(100.0);
+    m_chokeThreshold->setSuffix(" Ω");
+    m_chokeThreshold->setValue(1000.0);
+    m_chokeThreshold->setToolTip(
+        "The usual figure for a useful HF choke. Raise it if you want a "
+        "stricter test.");
+    chl->addWidget(m_chokeThreshold);
+    m_chokeMeasure = new QPushButton("Measure choke");
+    connect(m_chokeMeasure, &QPushButton::clicked, this,
+            &InstrumentPanel::onMeasureChoke);
+    chl->addWidget(m_chokeMeasure);
+    chl->addStretch();
+    v->addWidget(chBox);
+
+    m_plotCable = new TracePlot();
+    m_plotCable->setUnit(TracePlot::Unit::Ohms);
+    m_plotCable->setTitle("Cable bench");
+    m_plotCable->setPlaceholder(
+        "Velocity factor: short the far end, sweep WIDE (1–300 MHz), enter the\n"
+        "length, press Measure VF.\n\n"
+        "Choke: fit the G3TXQ fixture across CH0–CH1 and press Measure choke.\n"
+        "See the guide on the right for both.");
+    connect(m_plotCable, &TracePlot::cursorMoved,
+            this, &InstrumentPanel::onCursorMoved);
+    v->addWidget(m_plotCable, 1);
+
+    m_cableReport = new QPlainTextEdit();
+    m_cableReport->setReadOnly(true);
+    m_cableReport->setMinimumHeight(180);
+    m_cableReport->setStyleSheet(
+        "background:#050a14; color:#cfe3ff; font-family:Consolas;");
+    m_cableReport->setPlainText(
+        "Cable bench.\n\n"
+        "  Velocity factor — measured, not assumed. The same electrical\n"
+        "  length is 190.7 ft at VF 0.66 or 245.6 ft at 0.85, and loss is\n"
+        "  judged per foot, so the wrong VF condemns a good cable.\n\n"
+        "  Common-mode choke — impedance on the OUTSIDE of the braid,\n"
+        "  per band. Above ~1000 Ω is useful; tens of ohms is not.");
+    v->addWidget(m_cableReport);
+
+    m_cableGuide = new GuidePanel();
+    m_cableGuide->setGuide(velocityFactorGuide());
+    connect(m_cableGuide, &GuidePanel::runCommand,
+            this, &InstrumentPanel::onGuideCommand);
+
+    auto* bar = new QHBoxLayout();
+    auto* vfBtn = new QPushButton("Velocity factor guide");
+    connect(vfBtn, &QPushButton::clicked, this,
+            &InstrumentPanel::onShowVfGuide);
+    bar->addWidget(vfBtn);
+    auto* chBtn = new QPushButton("Choke guide");
+    connect(chBtn, &QPushButton::clicked, this,
+            &InstrumentPanel::onShowChokeGuide);
+    bar->addWidget(chBtn);
+    bar->addStretch();
+
+    auto* right = new QWidget();
+    auto* rv = new QVBoxLayout(right);
+    rv->setContentsMargins(0, 0, 0, 0);
+    rv->addLayout(bar);
+    rv->addWidget(m_cableGuide, 1);
+
+    auto* split = new QSplitter(Qt::Horizontal);
+    split->addWidget(page);
+    split->addWidget(right);
+    split->setStretchFactor(0, 3);
+    split->setStretchFactor(1, 2);
+    split->setSizes({880, 600});
+
+    m_tabs->addTab(split, "Cable");
+}
+
+void InstrumentPanel::onShowVfGuide()
+{
+    m_cableGuide->setGuide(velocityFactorGuide());
+}
+
+void InstrumentPanel::onShowChokeGuide()
+{
+    m_cableGuide->setGuide(chokeGuide());
+}
+
+void InstrumentPanel::onMeasureVf()
+{
+    QString why;
+    if (txInterlockBlocks(&why)) {
+        QMessageBox::warning(this, "Refused — TX is active", why);
+        return;
+    }
+    if (m_busy) return;
+    QString port;
+    for (const auto& id : m_found)
+        if (id.kind == InstrumentId::Kind::NanoVna) port = id.port;
+    if (port.isEmpty()) {
+        log("cable: no NanoVNA found — press \"Probe instruments\" first.");
+        return;
+    }
+    m_capturingVf = true;
+    setBusy(true);
+    // Wide span on purpose: a short jumper resonates high, and one crossing
+    // cannot be averaged. See the guide.
+    log("cable: VF sweep 1–300 MHz (wide, so a short cable shows several "
+        "resonances)");
+    QMetaObject::invokeMethod(m_worker, "runNanoVnaSweep", Qt::QueuedConnection,
+                              Q_ARG(QString, port), Q_ARG(qint64, 1000000),
+                              Q_ARG(qint64, 300000000), Q_ARG(int, 201));
+}
+
+void InstrumentPanel::onMeasureChoke()
+{
+    QString why;
+    if (txInterlockBlocks(&why)) {
+        QMessageBox::warning(this, "Refused — TX is active", why);
+        return;
+    }
+    if (m_busy) return;
+    QString port;
+    for (const auto& id : m_found)
+        if (id.kind == InstrumentId::Kind::NanoVna) port = id.port;
+    if (port.isEmpty()) {
+        log("cable: no NanoVNA found — press \"Probe instruments\" first. "
+            "The choke test needs two ports (S21).");
+        return;
+    }
+    m_capturingChoke = true;
+    setBusy(true);
+    log("cable: choke S21 sweep 1–50 MHz (160 m through 6 m)");
+    QMetaObject::invokeMethod(m_worker, "runNanoVnaS21Sweep",
+                              Qt::QueuedConnection, Q_ARG(QString, port),
+                              Q_ARG(qint64, 1000000), Q_ARG(qint64, 50000000),
                               Q_ARG(int, 201));
 }
 
@@ -1164,6 +1331,116 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
                       .arg(good ? "CAL GOOD" : "CAL SUSPECT — redo it");
         if (m_guide) m_guide->commandFinished(good, verdict);
         log("guide: " + verdict);
+        return;
+    }
+
+    // Velocity factor: the reactance zero-crossings of a shorted line.
+    if (m_capturingVf) {
+        m_capturingVf = false;
+        QVector<QPair<double, double>> fx;
+        for (const auto& p : result.points) fx << qMakePair(p.hz / 1e6, p.x);
+        const double metres = m_vfLengthIn->value() * 0.0254;
+        const VfResult vf = measureVelocityFactor(fx, metres);
+
+        TracePlot::Trace t;
+        t.label = "X (ohms)";
+        t.color = QColor("#ff7b72");
+        for (const auto& p : result.points) t.points.insert(p.hz, p.x);
+        m_plotCable->setTraces({t});
+        m_plotCable->setUnit(TracePlot::Unit::Ohms);
+        m_plotCable->setTitle("Reactance of the shorted line — zeros give the "
+                              "electrical length");
+
+        QStringList o;
+        if (!vf.ok) {
+            o << "VELOCITY FACTOR — no result" << ("  " + vf.error);
+        } else {
+            QVector<TracePlot::Marker> marks;
+            for (double f : vf.crossingsMhz) {
+                TracePlot::Marker m;
+                m.hz = qint64(f * 1e6);
+                m.color = QColor(120, 200, 255, 110);
+                marks << m;
+            }
+            m_plotCable->setMarkers(marks);
+
+            o << "VELOCITY FACTOR";
+            o << "";
+            o << QString("  you measured        %1 in = %2 m")
+                     .arg(m_vfLengthIn->value(), 0, 'f', 2)
+                     .arg(vf.physicalMetres, 0, 'f', 4);
+            o << QString("  crossings found     %1, mean spacing %2 MHz "
+                         "(spread %3%)")
+                     .arg(vf.crossingsMhz.size())
+                     .arg(vf.meanSpacingMhz, 0, 'f', 4)
+                     .arg(vf.spacingSpreadPct, 0, 'f', 1);
+            o << QString("  electrical length   %1 m   [MEASURED]")
+                     .arg(vf.electricalMetres, 0, 'f', 4);
+            o << "";
+            o << QString("  ⇒ VELOCITY FACTOR   %1").arg(vf.velocityFactor, 0, 'f', 4);
+            o << QString("    closest known      %1 (VF %2)")
+                     .arg(vf.nearestCable).arg(vf.nearestVf, 0, 'f', 2);
+            o << "";
+            o << "  ⚠ This figure is only as good as the length you entered.";
+            o << "    A 10% length error is a 10% VF error.";
+            o << "  ⚠ Put the sweep back to your calibrated span before doing";
+            o << "    antenna or feedline work — this one ran 1–300 MHz.";
+        }
+        if (!vf.caution.isEmpty()) { o << ""; o << "  ⚠ " + vf.caution; }
+        m_cableReport->setPlainText(o.join('\n'));
+        log(vf.ok ? QString("cable: VF = %1").arg(vf.velocityFactor, 0, 'f', 4)
+                  : "cable: " + vf.error);
+        return;
+    }
+
+    // Common-mode choke: S21 across the G3TXQ fixture -> series impedance.
+    if (m_capturingChoke) {
+        m_capturingChoke = false;
+        QVector<QPair<double, double>> fs;
+        for (const auto& p : result.points) fs << qMakePair(p.hz / 1e6, p.dbm);
+        const ChokeResult cr =
+            analyseChoke(fs, 50.0, m_chokeThreshold->value());
+
+        QStringList o;
+        if (!cr.ok) {
+            o << "CHOKE — no result" << ("  " + cr.error);
+            m_plotCable->clear();
+        } else {
+            TracePlot::Trace t;
+            t.label = "|Z| common-mode";
+            t.color = QColor("#7ee787");
+            for (const auto& p : cr.points)
+                t.points.insert(qint64(p.mhz * 1e6), p.zMagOhms);
+            m_plotCable->setUnit(TracePlot::Unit::Ohms);
+            m_plotCable->setTraces({t});
+            m_plotCable->setTitle(
+                QString("Common-mode impedance — peak %1 Ω at %2 MHz")
+                    .arg(cr.peakOhms, 0, 'f', 0).arg(cr.peakMhz, 0, 'f', 2));
+
+            o << "COMMON-MODE CHOKE  (G3TXQ fixture)";
+            o << "";
+            o << QString("  peak      %1 Ω at %2 MHz  ← its self-resonance")
+                     .arg(cr.peakOhms, 0, 'f', 0).arg(cr.peakMhz, 0, 'f', 2);
+            o << QString("  weakest   %1 Ω at %2 MHz")
+                     .arg(cr.worstOhms, 0, 'f', 0).arg(cr.worstMhz, 0, 'f', 2);
+            o << "";
+            o << QString("  band     |Z| Ω     vs %1 Ω")
+                     .arg(m_chokeThreshold->value(), 0, 'f', 0);
+            for (const auto& b : cr.bands)
+                o << QString("  %1 %2   %3")
+                         .arg(b.band, -8)
+                         .arg(b.ohms, 8, 'f', 0)
+                         .arg(b.pass ? "pass" : "FAIL");
+            o << "";
+            o << "  " + cr.verdict;
+            o << "";
+            o << "  ⚠ A choke is not flat: it rises with frequency, peaks at";
+            o << "    self-resonance, then falls away. Which bands it helps on";
+            o << "    depends on where that peak sits.";
+        }
+        if (!cr.caution.isEmpty()) { o << ""; o << "  ⚠ " + cr.caution; }
+        m_cableReport->setPlainText(o.join('\n'));
+        log(cr.ok ? "cable: " + cr.verdict : "cable: " + cr.error);
         return;
     }
 

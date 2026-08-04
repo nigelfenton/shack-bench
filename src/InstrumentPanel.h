@@ -26,6 +26,7 @@
 
 #include "CoaxAnalysis.h"
 #include "Scope.h"
+#include "CableTests.h"
 #include "GuidePanel.h"
 #include "TrapAnalysis.h"
 #include "Instrument.h"
@@ -80,6 +81,10 @@ private slots:
     void onRawCommandDone(bool ok, const QString& reply);
     void onShowCalGuide();
     void onShowTrapGuide();
+    void onMeasureVf();
+    void onMeasureChoke();
+    void onShowVfGuide();
+    void onShowChokeGuide();
     void onScopeExportCsv();
     void onScopeExportPng();
 
@@ -89,6 +94,7 @@ private:
     void buildFeedlineTab();
     void buildScopeTab();
     void buildTrapTab();
+    void buildCableTab();
     void log(const QString& line);
     void refreshPlots();
     void setBusy(bool busy);
@@ -158,6 +164,17 @@ private:
     TracePlot*      m_plotTrap = nullptr;
     bool            m_capturingTrap = false;
     GuidePanel*     m_guide = nullptr;
+
+    // --- cable tab (velocity factor + common-mode choke) ---
+    QDoubleSpinBox* m_vfLengthIn = nullptr;
+    QPushButton*    m_vfMeasure = nullptr;
+    QDoubleSpinBox* m_chokeThreshold = nullptr;
+    QPushButton*    m_chokeMeasure = nullptr;
+    QPlainTextEdit* m_cableReport = nullptr;
+    TracePlot*      m_plotCable = nullptr;
+    GuidePanel*     m_cableGuide = nullptr;
+    bool            m_capturingVf = false;
+    bool            m_capturingChoke = false;
     bool            m_verifyingCal = false;
 
     // --- shared ---

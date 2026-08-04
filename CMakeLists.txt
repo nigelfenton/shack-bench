@@ -100,6 +100,7 @@ set(TCIMON_SOURCES
     src/Scope.cpp
     src/TrapAnalysis.cpp
     src/GuidePanel.cpp
+    src/CableTests.cpp
     src/InstrumentPanel.cpp
     src/SwrPlot.h
     src/CalPlot.cpp
@@ -233,3 +234,14 @@ target_include_directories(trap_analysis_test PRIVATE src)
 target_link_libraries(trap_analysis_test PRIVATE Qt6::Core)
 set_target_properties(trap_analysis_test PROPERTIES AUTOMOC ON)
 add_test(NAME trap_analysis_test COMMAND trap_analysis_test)
+
+# ── Cable tests (velocity factor + common-mode choke) ─────────────────────
+add_executable(cable_tests_test
+    tests/cable_tests_test.cpp
+    src/CableTests.cpp
+    src/CoaxAnalysis.cpp
+)
+target_include_directories(cable_tests_test PRIVATE src)
+target_link_libraries(cable_tests_test PRIVATE Qt6::Core Qt6::SerialPort)
+set_target_properties(cable_tests_test PROPERTIES AUTOMOC ON)
+add_test(NAME cable_tests_test COMMAND cable_tests_test)

@@ -262,6 +262,205 @@ const Guide& trapGuide()
     return g;
 }
 
+const Guide& velocityFactorGuide()
+{
+    static Guide g = [] {
+        Guide guide;
+        guide.name = "Measure a cable's velocity factor";
+        guide.intro =
+            "<p>Velocity factor is how fast a signal travels down the cable, as "
+            "a fraction of the speed of light. Solid polyethylene is about "
+            "<b>0.66</b>; foam dielectrics are around <b>0.85</b>.</p>"
+            "<p><b>Why bother?</b> Because an analyser measures a cable's "
+            "<i>electrical</i> length, and converting that into feet needs the "
+            "VF. Get it wrong and every derived number is wrong with it.</p>"
+            "<p>This shack has been caught by exactly that. A perfectly healthy "
+            "DXE-400 run was judged <i>“25–40 % lossier than spec”</i> because "
+            "the analysis assumed 0.66. The same measured line is "
+            "<b>190.7 ft at VF 0.66</b> but <b>245.6 ft at 0.85</b> — and since "
+            "loss is judged <i>per foot</i>, the wrong VF condemned a good "
+            "cable. Measuring VF once, from an offcut, removes that whole class "
+            "of error.</p>";
+
+        GuideStep s;
+
+        s = {};
+        s.title = "You need a known length of the same cable";
+        s.body =
+            "<p>Use an offcut or a jumper made from the <b>same reel</b> as the "
+            "run you care about. A metre or two is ideal.</p>"
+            "<p><b>Measure it carefully, and be consistent about where from.</b> "
+            "Connector shoulder to connector shoulder is the usual convention "
+            "and is what this guide assumes.</p>"
+            "<p>⚠ The result is only as good as this measurement. A 10 % error "
+            "in the length becomes a <b>10 % error in the velocity factor</b> "
+            "— the test cannot do better than your tape measure.</p>";
+        guide.steps << s;
+
+        s = {};
+        s.title = "SHORT the far end";
+        s.body =
+            "<p>Connect the cable to <b>CH0</b> and put a <b>short</b> on the "
+            "far end — a shorting plug, or braid soldered to centre.</p>"
+            "<p><i>Why:</i> a shorted line's reactance passes through zero at "
+            "regular intervals, and the spacing of those crossings is set "
+            "purely by the electrical length. Nothing else about the cable "
+            "matters, which is what makes this measurement robust.</p>"
+            "<p>⭐ Those crossings occur every <b>quarter</b> wavelength, not "
+            "every half — they alternate between series and parallel resonance. "
+            "Assuming half would put the length out by a factor of two.</p>";
+        s.needsFitting = true;
+        s.fitting = "the cable on CH0 with its far end SHORTED";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Sweep WIDE — this is the important bit";
+        s.body =
+            "<p>A short cable resonates high. A 97-inch jumper has its first "
+            "crossing around <b>20–26 MHz</b>, so a 3–30 MHz sweep catches only "
+            "one — and one crossing cannot be averaged.</p>"
+            "<p>Sweep <b>1–300 MHz</b> instead. That same jumper then shows "
+            "about <b>14 crossings</b>, and averaging them makes the answer far "
+            "less sensitive to any single interpolated point.</p>"
+            "<p>⚠ <b>That span is outside your 3–30 MHz calibration.</b> For "
+            "this particular measurement that is acceptable — the crossings are "
+            "<i>frequencies</i>, and frequency is not affected by calibration "
+            "the way magnitude is. But do not read anything into the impedance "
+            "values from this sweep.</p>";
+        s.action = "Set 1–300 MHz, 201 points";
+        s.command = "sweep 1000000 300000000 201";
+        s.verify = "sweep";
+        s.expect = "1000000 300000000";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Enter the length, then measure";
+        s.body =
+            "<p>Type the physical length into the box on the left, then press "
+            "<b>Measure VF</b>.</p>"
+            "<p>The panel finds every reactance zero-crossing, averages their "
+            "spacing, converts that to an electrical length, and divides your "
+            "measured length by it.</p>"
+            "<p><b>Sanity check the answer.</b> Real coax is 0.66–0.88. "
+            "Anything outside that means the length is wrong, the far end is "
+            "not shorted, or it is not a plain piece of cable. The panel "
+            "refuses such results rather than reporting them.</p>";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Afterwards — put the range back";
+        s.body =
+            "<p>The sweep is now 1–300 MHz, which is outside your calibration. "
+            "Set it back to the calibrated span before doing any antenna or "
+            "feedline work, or those measurements will be interpolated and "
+            "unreliable.</p>";
+        s.action = "Restore 3–30 MHz, 201 points";
+        s.command = "sweep 3000000 30000000 201";
+        s.verify = "sweep";
+        s.expect = "3000000 30000000";
+        guide.steps << s;
+
+        return guide;
+    }();
+    return g;
+}
+
+const Guide& chokeGuide()
+{
+    static Guide g = [] {
+        Guide guide;
+        guide.name = "Measure a common-mode choke";
+        guide.intro =
+            "<p>A common-mode choke's job is to stop RF flowing on the "
+            "<b>outside</b> of the coax braid. That current is what turns a "
+            "feedline into part of the antenna: RF in the shack, noise pickup, "
+            "and a pattern that is not the one you designed.</p>"
+            "<p>The wanted signal travels <i>inside</i> the coax as a "
+            "differential pair, and a good choke ignores it entirely. So we "
+            "must measure the <b>outside</b> of the shield specifically — which "
+            "is what the G3TXQ fixture does.</p>"
+            "<p>A useful HF choke presents more than about <b>1000 Ω</b> across "
+            "the bands you use. Below a few hundred ohms it is not doing much.</p>";
+
+        GuideStep s;
+
+        s = {};
+        s.title = "The G3TXQ fixture";
+        s.body =
+            "<p>Named for Steve Hunt G3TXQ, whose measurements are the standard "
+            "amateur reference for this.</p>"
+            "<p>Two SO-239 sockets, and:</p>"
+            "<ul>"
+            "<li>each socket's <b>centre pin shorted to its own shell</b></li>"
+            "<li>the choke under test bridging the <b>two shells</b></li>"
+            "</ul>"
+            "<p>Because the centre pins are tied to their shells, the analyser "
+            "cannot see the inside of the coax at all — it drives the shield's "
+            "outer surface, which is exactly the path the choke exists to "
+            "block. The choke becomes a series element between the two ports, "
+            "so the impedance follows from S21.</p>"
+            "<p>⚠ Keep the leads short. At 30 MHz a few inches of stray wiring "
+            "has its own inductance and will flatter or spoil the result.</p>";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Fit the choke and connect";
+        s.body =
+            "<p>Fixture between <b>CH0 and CH1</b>, choke bridging the shells.</p>"
+            "<p>⚠ Measure the <b>bare fixture</b> first, with the shells bridged "
+            "by a short strap instead of the choke. That tells you the fixture's "
+            "own floor — if it reads only a few hundred ohms empty, it cannot "
+            "honestly report a kilohm with a choke fitted.</p>";
+        s.needsFitting = true;
+        s.fitting = "the G3TXQ fixture across CH0–CH1, choke bridging the shells";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Sweep the bands you actually use";
+        s.body =
+            "<p><b>1–50 MHz</b> covers 160 m through 6 m and shows the whole "
+            "shape of the choke's behaviour.</p>"
+            "<p>A choke is not flat. It rises with frequency, <b>peaks at its "
+            "self-resonance</b>, then falls away above it. Where that peak sits "
+            "decides which bands it is good on — which is why the panel reports "
+            "<i>per band</i> rather than giving one number.</p>";
+        s.action = "Set 1–50 MHz, 201 points";
+        s.command = "sweep 1000000 50000000 201";
+        s.verify = "sweep";
+        s.expect = "1000000 50000000";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Reading the result";
+        s.body =
+            "<p><b>Above 1 kΩ</b> on a band — the choke is working there.<br>"
+            "<b>A few hundred ohms</b> — marginal.<br>"
+            "<b>Tens of ohms</b> — it is not choking anything.</p>"
+            "<p>A worked example from this shack: the homebrew coil removed from "
+            "the 5-BTV feed was 4–5 turns of coax at 6 inches diameter, roughly "
+            "2.5 µH. That computes to about <b>31 Ω on 160 m rising to 450 Ω on "
+            "10 m</b> — failing every band. Its replacement, large-diameter "
+            "loops of around 20 µH, is 5–10× better and comfortably over the "
+            "threshold.</p>"
+            "<p>⚠ If the impedance peak sits at the edge of the sweep, the real "
+            "self-resonance is outside it. Widen the span to find where the "
+            "choke actually works best — the panel says so when it detects it.</p>";
+        guide.steps << s;
+
+        s = {};
+        s.title = "Afterwards";
+        s.body =
+            "<p>Put the sweep back to your calibrated 3–30 MHz span before "
+            "returning to antenna or feedline work.</p>";
+        s.action = "Restore 3–30 MHz, 201 points";
+        s.command = "sweep 3000000 30000000 201";
+        guide.steps << s;
+
+        return guide;
+    }();
+    return g;
+}
+
 // ---------------------------------------------------------------------------
 
 GuidePanel::GuidePanel(QWidget* parent) : QWidget(parent)
