@@ -37,7 +37,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: 'qtwebsockets qtserialport qtsvg'
+          modules: 'qtwebsockets qtserialport'
           cache: true
 
       - name: Set up MSVC
@@ -143,7 +143,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: 'qtwebsockets qtserialport qtsvg'
+          modules: 'qtwebsockets qtserialport'
           cache: true
 
       - name: Configure
@@ -214,7 +214,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
-          modules: 'qtwebsockets qtserialport qtsvg'
+          modules: 'qtwebsockets qtserialport'
           cache: true
 
       - name: Install Ninja
