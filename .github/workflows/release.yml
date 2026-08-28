@@ -21,14 +21,7 @@ permissions:
   contents: write   # needed to create the GitHub Release
 
 env:
-  # 6.8.4, not 6.8.0: Qt 6.8.0's FindWrapOpenGL.cmake links the AGL framework,
-  # which Apple removed from the SDK in macOS 26 (Tahoe). macos-latest has moved
-  # to that SDK, so the macOS job failed at link with "framework 'AGL' not
-  # found" while Windows and Linux were unaffected. 6.8.4 carries the fix.
-  #
-  # This is a pinned dependency meeting a floating runner — the workflow did not
-  # change, the ground under it did.
-  QT_VERSION: '6.8.4'
+  QT_VERSION: '6.8.0'
 
 jobs:
   # ── Windows ─────────────────────────────────────────────────────────────
@@ -220,7 +213,15 @@ jobs:
 
   # ── macOS (Apple Silicon) ───────────────────────────────────────────────
   build-macos:
-    runs-on: macos-latest
+    # macos-14, NOT macos-latest. Apple removed the AGL framework in macOS 26
+    # (Tahoe), and Qt 6.8.0's FindWrapOpenGL.cmake still links it, so the job
+    # failed with "framework 'AGL' not found" the moment macos-latest drifted
+    # onto that SDK. Nothing in this project references AGL.
+    #
+    # Pinned rather than chasing a newer Qt: ShackBook builds all four
+    # artifacts on macos-14 with this exact Qt version, so this is a
+    # configuration proven to work rather than a guess.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
