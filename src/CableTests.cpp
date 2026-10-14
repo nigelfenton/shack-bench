@@ -136,23 +136,54 @@ ChokeResult analyseChoke(
     const QVector<QPair<double, double>>& freqMhzAndS21Db, double fixtureZ0,
     double thresholdOhms)
 {
+    QVector<S21Sample> s;
+    s.reserve(freqMhzAndS21Db.size());
+    for (const auto& p : freqMhzAndS21Db) {
+        S21Sample x;
+        x.mhz = p.first;
+        // A dB of -120 or below is the driver's "magnitude was 0" sentinel;
+        // keep it at exactly zero so the dead-data guard sees it.
+        x.s21 = p.second <= -119.9 ? 0.0 : std::pow(10.0, p.second / 20.0);
+        s << x;
+    }
+    return analyseChoke(s, fixtureZ0, thresholdOhms);
+}
+
+ChokeResult analyseChoke(const QVector<S21Sample>& samples, double fixtureZ0,
+                         double thresholdOhms)
+{
     ChokeResult r;
-    if (freqMhzAndS21Db.size() < 8) {
+    if (samples.size() < 8) {
         r.error = "too few points to judge a choke";
         return r;
     }
     if (fixtureZ0 <= 0) fixtureZ0 = 50.0;
 
+    // ⚠ Dead data. Outside its calibrated span the NanoVNA can report exactly
+    // zero, and 1/|S21| of zero reads as a near-infinite impedance — a false
+    // PASS at the band edges. Same guard as the VF analysis: skip, count, and
+    // refuse the sweep if too much of it is dead.
+    int dead = 0;
+    for (const auto& p : samples)
+        if (std::abs(p.s21) == 0.0) ++dead;
+    if (dead * 4 > samples.size()) {
+        r.error = QString("%1 of %2 points read exactly zero — the sweep runs "
+                          "outside the VNA's calibrated span. Sweep only the "
+                          "calibrated range.").arg(dead).arg(samples.size());
+        return r;
+    }
+
     // In a Z0 system, a series impedance Z across the through path gives
     //     S21 = 2*Z0 / (2*Z0 + Z)    =>    Z = 2*Z0 * (1/S21 - 1)
-    // The choke bridges the two shells, so it IS that series element.
+    // The choke bridges the two shells, so it IS that series element. Complex
+    // S21 gives the true |Z|, reactive or not.
     double bestZ = -1, worstZ = 1e18;
-    for (const auto& p : freqMhzAndS21Db) {
-        const double s21 = std::pow(10.0, p.second / 20.0);
-        if (s21 <= 0 || s21 >= 1.0) continue;   // |S21| >= 1 is not passive
+    for (const auto& p : samples) {
+        const double mag = std::abs(p.s21);
+        if (mag <= 0 || mag >= 1.0) continue;   // dead, or not passive
         ChokePoint cp;
-        cp.mhz = p.first;
-        cp.zMagOhms = 2.0 * fixtureZ0 * (1.0 / s21 - 1.0);
+        cp.mhz = p.mhz;
+        cp.zMagOhms = std::abs(2.0 * fixtureZ0 * (1.0 / p.s21 - 1.0));
         r.points << cp;
         if (cp.zMagOhms > bestZ) { bestZ = cp.zMagOhms; r.peakMhz = cp.mhz; }
         if (cp.zMagOhms < worstZ) { worstZ = cp.zMagOhms; r.worstMhz = cp.mhz; }
@@ -211,6 +242,12 @@ ChokeResult analyseChoke(
         r.caution = "the impedance peak is at the edge of the sweep, so the "
                     "choke's self-resonance is probably outside it — widen the "
                     "span to see where it actually works best.";
+    }
+    if (dead > 0) {
+        const QString note = QString("%1 point(s) read exactly zero (outside "
+                                     "the calibrated span) and were skipped.")
+                                 .arg(dead);
+        r.caution = r.caution.isEmpty() ? note : r.caution + "  " + note;
     }
 
     r.ok = true;

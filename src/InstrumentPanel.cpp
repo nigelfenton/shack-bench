@@ -1458,8 +1458,14 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
     // Common-mode choke: S21 across the G3TXQ fixture -> series impedance.
     if (m_capturingChoke) {
         m_capturingChoke = false;
-        QVector<QPair<double, double>> fs;
-        for (const auto& p : result.points) fs << qMakePair(p.hz / 1e6, p.dbm);
+        // Complex S21, not |S21| — see analyseChoke().
+        QVector<S21Sample> fs;
+        for (const auto& p : result.points) {
+            S21Sample s;
+            s.mhz = p.hz / 1e6;
+            s.s21 = {p.s21Re, p.s21Im};
+            fs << s;
+        }
         const ChokeResult cr =
             analyseChoke(fs, 50.0, m_chokeThreshold->value());
 

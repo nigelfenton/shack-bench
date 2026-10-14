@@ -968,11 +968,22 @@ int CalibrationPanel::kneeGain(const QVector<Row>& rows) const
     // Only points with enough samples AND an actual carrier may qualify —
     // a no-TX point's floor-level ALC passes any target (2026-06-12 run
     // recommended a gain whose only "measurement" was one silent sample).
-    int best = -1;
+    //
+    // ⚠ The knee is where ALC FIRST crosses the target, walking up in gain —
+    // not merely the highest gain under it. One noisy or late-keyed point at
+    // high gain used to beat a run of lower gains that were already over,
+    // recommending an over-driven setting (the same phantom-winner problem).
+    QVector<const Row*> valid;
     for (const Row& r : rows)
-        if (r.hasAlc && r.n >= kMinValidSamples && r.fwdMax > 0.0 &&
-            r.alcMax <= m_alcTargetVal && r.gain > best)
-            best = r.gain;
+        if (r.hasAlc && r.n >= kMinValidSamples && r.fwdMax > 0.0)
+            valid.push_back(&r);
+    std::stable_sort(valid.begin(), valid.end(),
+                     [](const Row* a, const Row* b) { return a->gain < b->gain; });
+    int best = -1;
+    for (const Row* r : valid) {
+        if (r->alcMax > m_alcTargetVal) break;   // first point over: stop
+        best = r->gain;
+    }
     return best;
 }
 

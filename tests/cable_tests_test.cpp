@@ -9,6 +9,7 @@
 
 #include <QtGlobal>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 
 static constexpr double kPiLocal = 3.14159265358979323846;
@@ -173,6 +174,61 @@ int main()
     ChokeResult ch = analyseChoke(hot, 50.0, 1000.0);
     check(!ch.ok && ch.error.contains("passive"),
           "|S21| > 1 on a passive fixture is refused, not turned into a number");
+
+    std::printf("\n=== choke: a REACTIVE 1050 ohm choke needs the phase ===\n");
+    // Away from self-resonance a choke is mostly reactance. Build the complex
+    // S21 of a pure j1050 ohm series element from the closed form.
+    {
+        const std::complex<double> z(0.0, 1050.0);
+        const std::complex<double> s21 = 100.0 / (100.0 + z);
+        QVector<S21Sample> cx;
+        QVector<QPair<double, double>> mag;
+        for (int i = 0; i < 50; ++i) {
+            S21Sample s;
+            s.mhz = 3.0 + 27.0 * i / 49.0;
+            s.s21 = s21;
+            cx << s;
+            mag << qMakePair(s.mhz, 20.0 * std::log10(std::abs(s21)));
+        }
+        const ChokeResult rc = analyseChoke(cx, 50.0, 1000.0);
+        near(rc.peakOhms, 1050.0, 1.0, "complex S21 recovers |Z| = 1050 ohm");
+        check(rc.bandsAboveThreshold == rc.bandsTested && rc.bandsTested > 0,
+              "and it PASSES the 1 kohm threshold, as it should");
+        const ChokeResult rm = analyseChoke(mag, 50.0, 1000.0);
+        check(rm.peakOhms < 1000.0,
+              "the magnitude-only form under-reads it (the old bug, kept "
+              "as the fallback's documented limit)");
+    }
+
+    std::printf("\n=== choke: dead (exactly zero) data is not a false PASS ===\n");
+    {
+        // 5 kohm resistive choke, but the outer points read 0 — what the VNA
+        // returns outside its calibrated span.
+        auto build = [](int deadEachEnd) {
+            QVector<S21Sample> v;
+            for (int i = 0; i < 100; ++i) {
+                S21Sample s;
+                s.mhz = 1.0 + 49.0 * i / 99.0;
+                const bool dead = i < deadEachEnd || i >= 100 - deadEachEnd;
+                s.s21 = dead ? 0.0 : 100.0 / (100.0 + 5000.0);
+                v << s;
+            }
+            return v;
+        };
+        const ChokeResult few = analyseChoke(build(5), 50.0, 1000.0);
+        check(few.ok, "a few dead points are skipped, the rest analysed");
+        near(few.peakOhms, 5000.0, 60.0,
+             "the peak is the real 5 kohm, not ~1e8 from a zero");
+        check(few.caution.contains("exactly zero"), "and the skip is reported");
+        const ChokeResult lots = analyseChoke(build(20), 50.0, 1000.0);
+        check(!lots.ok && lots.error.contains("calibrated"),
+              "a sweep that is 40% dead is refused");
+        QVector<QPair<double, double>> sentinel;
+        for (int i = 0; i < 40; ++i)
+            sentinel << qMakePair(1.0 + i, i < 20 ? -120.0 : -34.2);
+        check(!analyseChoke(sentinel, 50.0, 1000.0).ok,
+              "the driver's -120 dB sentinel counts as dead in the dB form");
+    }
 
     std::printf("\n%d check(s) failed.\n", failures);
     return failures ? 1 : 0;

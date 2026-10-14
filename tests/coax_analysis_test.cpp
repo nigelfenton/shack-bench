@@ -38,11 +38,12 @@ static void near(double got, double want, double tol, const char* what)
 // Build a synthetic but physically exact line so the maths can be checked
 // against closed-form truth: Zin(open) = Z0/tanh(gl), Zin(short) = Z0*tanh(gl).
 static void syntheticPair(double z0, double lengthM, double vf,
-                          double lossDbPerM, SweepResult* oc, SweepResult* sc)
+                          double lossDbPerM, SweepResult* oc, SweepResult* sc,
+                          double fromHz = 3e6, double toHz = 30e6)
 {
     const double c = 299792458.0;
     for (int i = 0; i <= 200; ++i) {
-        const double hz = 3e6 + (30e6 - 3e6) * i / 200.0;
+        const double hz = fromHz + (toHz - fromHz) * i / 200.0;
         const double beta = 2.0 * kPi * hz / (c * vf);
         const double alpha = lossDbPerM * lengthM / 8.685889638 / lengthM;
         const std::complex<double> gl(alpha * lengthM, beta * lengthM);
@@ -119,6 +120,29 @@ int main()
     int inv2 = 0, t2 = 0;
     check(!checkInversion(oc, oc, &inv2, &t2),
           "the same sweep used for both ends is REJECTED, not accepted");
+
+    std::printf("\n=== loss verdict stays inside the published table ===\n");
+    {
+        // A 30 m RG-213 line swept to 150 MHz: the table stops at 50 MHz, so
+        // the verdict must be judged at <= 50 MHz, not against a clamped figure.
+        SweepResult o2, s2;
+        syntheticPair(50.0, 30.0, 0.66, 0.002, &o2, &s2, 3e6, 150e6);
+        CoaxResult wide = analyseOpenShort(o2, s2, *rg);
+        check(wide.ok, "the wide RG-213 pair analyses");
+        check(wide.topMhz <= 50.0 + 1e-9,
+              "the loss verdict is taken at or below the table's 50 MHz top");
+        std::printf("       judged at %.2f MHz: %s\n", wide.topMhz,
+                    wide.verdict.toLocal8Bit().constData());
+
+        // A 1 m jumper over 3-30 MHz: fewer than two crossings, so no length.
+        SweepResult o3, s3;
+        syntheticPair(50.0, 1.0, 0.66, 0.002, &o3, &s3);
+        CoaxResult shortLine = analyseOpenShort(o3, s3, *rg);
+        check(!shortLine.verdict.contains("no published"),
+              "an unknown length is NOT reported as 'no published loss figures'");
+        check(shortLine.verdict.contains("length unknown"),
+              "it says the length is what is missing");
+    }
 
     std::printf("\n=== integrity reporting ===\n");
     SweepResult tiny;

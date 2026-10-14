@@ -221,12 +221,35 @@ CoaxResult analyseOpenShort(const SweepResult& openEnd,
     }
 
     // ---- verdict against the chosen cable --------------------------------
-    const LinePoint& top = out.points.last();
-    out.topMhz = top.mhz;
-    out.measuredLossAtTopDb = top.lossDb;
-    out.specLossAtTopDb = cable.specLossDb(top.mhz, out.physicalLengthFt);
+    // ⚠ Judge only where the published table actually reaches. specLossDb()
+    // clamps above its last anchor (50 MHz for most HF cables), so judging a
+    // 146 MHz point against the 50 MHz figure called a healthy RG-213 1.8×
+    // lossy. Use the highest swept point inside the table instead.
+    const double tableTop = cable.lossPer100ft.isEmpty()
+                                ? 0.0 : cable.lossPer100ft.last().first;
+    const LinePoint* top = &out.points.last();
+    if (tableTop > 0) {
+        for (int i = out.points.size() - 1; i >= 0; --i)
+            if (out.points[i].mhz <= tableTop) { top = &out.points[i]; break; }
+    }
+    out.topMhz = top->mhz;
+    out.measuredLossAtTopDb = top->lossDb;
+    out.specLossAtTopDb = cable.specLossDb(top->mhz, out.physicalLengthFt);
 
-    if (out.specLossAtTopDb > 0.01) {
+    if (cable.lossPer100ft.isEmpty()) {
+        out.verdict = "no published loss figures for this cable — length and "
+                      "Z0 only";
+    } else if (out.physicalLengthFt <= 0) {
+        // Not "no published figures" — the figures exist, but the spec loss
+        // scales with length and the length needs ≥ 2 X crossings.
+        out.verdict = "length unknown (fewer than two reactance crossings in "
+                      "the sweep), so loss can't be judged against spec — "
+                      "widen the sweep";
+    } else if (tableTop > 0 && out.points.first().mhz > tableTop) {
+        out.verdict = QString("the sweep starts above %1 MHz, the top of the "
+                              "published loss table — loss not judged")
+                          .arg(tableTop, 0, 'f', 0);
+    } else if (out.specLossAtTopDb > 0.01) {
         const double ratio = out.measuredLossAtTopDb / out.specLossAtTopDb;
         if (ratio < 1.15)
             out.verdict = QString("at or better than spec (%1×)")
@@ -239,8 +262,7 @@ CoaxResult analyseOpenShort(const SweepResult& openEnd,
             out.verdict = QString("%1× published loss — investigate")
                               .arg(ratio, 0, 'f', 2);
     } else {
-        out.verdict = "no published loss figures for this cable — length and "
-                      "Z0 only";
+        out.verdict = "published loss here is too small to judge against";
     }
 
     out.ok = true;
