@@ -75,6 +75,10 @@ struct InstrumentId {
 // no sweep is started and no instrument state is changed.
 QVector<InstrumentId> probeInstruments(QStringList* log = nullptr);
 
+// Parse one NanoVNA `data` line, "re im", strictly: exactly two finite numbers.
+// Exposed for testing.
+bool parseComplexPair(const QString& line, double* re, double* im);
+
 // ---------------------------------------------------------------------------
 
 class SweepWorker : public QObject {

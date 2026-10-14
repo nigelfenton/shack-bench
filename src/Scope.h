@@ -91,13 +91,30 @@ signals:
 };
 
 // Exposed for testing: decode the interleaved payload into per-channel samples.
-// Channels are stored as 2000-byte blocks, round-robin:
+// The ENABLED channels are stored as 2000-byte blocks, round-robin:
 //   |ch1 block|ch2 block|ch1 block|ch2 block|...
 // Samples are SIGNED bytes at 25 counts per division, so
 //   volts = raw / 25 * voltsPerDiv - offset
-QVector<double> decodeChannel(const QByteArray& payload, int channelIndex,
+//
+// ⚠ `slot` is the channel's 1-based position among the ENABLED channels, not
+// its physical number: with only CH2 on, CH2 is slot 1. Passing the physical
+// number skipped CH2's first block, and on a short capture returned nothing.
+// Use interleaveSlot() to get it.
+QVector<double> decodeChannel(const QByteArray& payload, int slot,
                               int enabledChannels, double voltsPerDiv,
                               double offsetV, int blockLen = 2000);
+
+// 1-based position of physical channel `index` among the enabled channels,
+// or 0 if that channel is not enabled.
+int interleaveSlot(const QVector<ScopeChannel>& channels, int index);
+
+// Validate a `#9` IEEE 488.2 definite-length block and return its samples:
+// header (11 bytes: '#9' + 9-digit length) + metadata to byte 128, then data.
+// ⚠ The payload is bounded by the DECLARED length — a trailing terminator or
+// extra bytes are not samples — and a block shorter than declared is rejected
+// as truncated rather than decoded as if complete.
+bool extractWaveformPayload(const QByteArray& buf, QByteArray* payload,
+                            QString* error);
 
 // Compute what the firmware will not report.
 void computeMeasurements(ScopeChannel* ch, double secondsPerSample);

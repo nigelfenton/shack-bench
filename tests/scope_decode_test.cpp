@@ -64,6 +64,55 @@ int main()
     const QVector<double> s1 = decodeChannel(solo, 1, 1, 1.0, 0.0);
     check(s1.size() == 1000, "with one channel enabled every byte belongs to it");
 
+    std::printf("\n=== CH2 alone is slot 1, not slot 2 ===\n");
+    {
+        QVector<ScopeChannel> chans(2);
+        chans[0].index = 1; chans[0].enabled = false;
+        chans[1].index = 2; chans[1].enabled = true;
+        check(interleaveSlot(chans, 2) == 1, "CH2-only: CH2 is the first slot");
+        check(interleaveSlot(chans, 1) == 0, "a disabled channel has no slot");
+        chans[0].enabled = true;
+        check(interleaveSlot(chans, 2) == 2, "both on: CH2 is the second slot");
+
+        // A 1500-sample CH2-only capture: the old physical-index decode
+        // started at byte 2000 and returned NOTHING.
+        QByteArray ch2only(1500, char(20));
+        const QVector<double> v = decodeChannel(ch2only, 1, 1, 1.0, 0.0);
+        check(v.size() == 1500, "CH2-only capture keeps every sample");
+        check(decodeChannel(ch2only, 2, 1, 1.0, 0.0).isEmpty(),
+              "a slot beyond the enabled count decodes nothing");
+    }
+
+    std::printf("\n=== #9 block framing ===\n");
+    {
+        // '#9' + 9-digit length, then 117 bytes of metadata to byte 128,
+        // then the samples. declared = 117 metadata + 4 samples.
+        auto block = [](int samples, const QByteArray& tail = QByteArray()) {
+            QByteArray b = "#9" + QByteArray::number(117 + samples)
+                                      .rightJustified(9, '0');
+            b += QByteArray(117, 'm');
+            b += QByteArray(samples, char(25));
+            b += tail;
+            return b;
+        };
+        QByteArray payload;
+        QString why;
+        check(extractWaveformPayload(block(4), &payload, &why)
+                  && payload.size() == 4, "a complete block yields its samples");
+        check(extractWaveformPayload(block(4, "\n"), &payload, &why)
+                  && payload.size() == 4,
+              "a trailing terminator is NOT decoded as a sample");
+        QByteArray cut = block(4);
+        cut.chop(2);
+        check(!extractWaveformPayload(cut, &payload, &why)
+                  && why.contains("truncated"),
+              "a block shorter than declared is rejected as truncated");
+        check(!extractWaveformPayload("#9000000000", &payload, &why),
+              "an empty block is rejected");
+        check(!extractWaveformPayload("#4abcd", &payload, &why),
+              "a non-#9 header is rejected");
+    }
+
     std::printf("\n=== computed measurements: 1 kHz sine, 2 Vpp ===\n");
     ScopeChannel ch;
     ch.index = 1;
