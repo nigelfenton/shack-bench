@@ -188,17 +188,20 @@ const Guide& trapGuide()
         s.body =
             "<p><b>f0 — resonant frequency.</b> The bottom of the notch. This "
             "is the number you are usually chasing.</p>"
-            "<p><b>Depth</b> — how far the notch falls below the passband. A "
+            "<p><b>Depth</b> — how far the notch falls below 0 dB (the "
+            "through-calibrated reference). A "
             "deep notch means a low-loss trap; a shallow one means resistance "
             "in the coil is spoiling it.</p>"
             "<p><b>Q — sharpness.</b> f0 divided by the 3 dB bandwidth. High Q "
             "is a narrow, deep notch; low Q is broad and shallow. A lossy or "
             "damp coil measures as lower Q.</p>"
-            "<p>⚠ What you get here is <b>loaded Q</b> — the analyser's 50 Ω "
-            "source and load damp the resonance, so it reads lower than the "
-            "trap's unloaded Q. It is the honest number for antenna work, "
-            "because the trap is loaded in service too, but it is not the "
-            "figure a coil datasheet quotes.</p>";
+            "<p>⚠ This is the <b>trap's own Q</b>, not a loaded Q. The trap's "
+            "impedance at resonance is tens of kΩ against the analyser's "
+            "50 Ω + 50 Ω, so 3 dB up from the bottom of the notch is where "
+            "the trap itself is at its half-power points. The figure is "
+            "comparable with the unloaded Q a coil datasheet quotes. It "
+            "describes the component; on the antenna the surroundings load "
+            "it further.</p>";
         guide.steps << s;
 
         s = {};
@@ -238,7 +241,10 @@ const Guide& trapGuide()
             "approximate.</p>"
             "<p>With only 201 points, a 3–30 MHz sweep puts 135 kHz between "
             "samples. A trap with a 3 dB bandwidth of 40 kHz is <i>entirely "
-            "between two points</i> at that resolution.</p>";
+            "between two points</i> at that resolution.</p>"
+            "<p>Shack-Bench flags that case as <b>undersampled</b>: Q and the "
+            "notch depth are then approximate, and L and C are estimated from "
+            "the notch's skirt instead, which a wide sweep does capture.</p>";
         guide.steps << s;
 
         s = {};
