@@ -247,9 +247,10 @@ the sweep.
 
 Side panel guides:
 
-- **Calibration guide**: an 8-step full 2-port NanoVNA calibration that
+- **Calibration guide**: a 9-step full 2-port NanoVNA calibration that
   runs each step for you, sets the span first, waits for each standard to
-  settle, and ends by **verifying** the cal on the still-fitted load.
+  settle, **verifies** the cal on the still-fitted load, and only then
+  **saves** it to slot 0 so it survives a power cycle.
 - **How this works**: f0, depth and Q, why the trap goes in series, and
   sweeping wide then narrow.
 

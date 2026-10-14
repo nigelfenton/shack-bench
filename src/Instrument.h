@@ -53,6 +53,7 @@ struct SweepResult {
     QString takenAtIso;
     QString antennaNote;      // "what was connected" -- filled by the panel
     bool    ok = false;
+    bool    cancelled = false;   // the operator pressed Stop; not a failure
     QString error;
 };
 

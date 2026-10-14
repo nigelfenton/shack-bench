@@ -124,11 +124,17 @@ const Guide& calibrationGuide()
         guide.steps << s;
 
         s = {};
-        s.title = "Apply and save";
+        // ⚠ This step used to be titled "Apply and save" with a button saying
+        // "Apply and save to slot 0" — but it only ever sent `cal done`, which
+        // applies the cal in RAM. Nothing was saved, so it was lost at the
+        // next power-off while the guide said otherwise. Saving is now its
+        // own final step, AFTER the verify, so a bad cal is never stored.
+        s.title = "Apply";
         s.body =
-            "<p>Finish the calibration and store it in slot 0 so it survives a "
-            "power cycle.</p>";
-        s.action = "Apply and save to slot 0";
+            "<p>Finish the calibration and make it active. It lives in the "
+            "instrument's memory for now — it is <b>saved</b> in the last "
+            "step, once the verify has proved it good.</p>";
+        s.action = "Apply the calibration";
         s.command = "cal done";
         s.verify = "cal";
         s.expect = "thru";
@@ -157,6 +163,17 @@ const Guide& calibrationGuide()
         s.fitting = "the 50 Ω LOAD back on port 1";
         s.action = "Run the verification sweep";
         s.command = "__verify_load";     // handled specially by the tab
+        guide.steps << s;
+
+        s = {};
+        s.title = "Save to slot 0";
+        s.body =
+            "<p>The calibration verified good — now store it so it survives a "
+            "power cycle. Slot 0 is the one the NanoVNA loads at power-on.</p>"
+            "<p>⚠ This <b>overwrites</b> whatever calibration was saved in "
+            "slot 0 before.</p>";
+        s.action = "Save to slot 0";
+        s.command = "save 0";
         guide.steps << s;
 
         return guide;
