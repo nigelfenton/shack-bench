@@ -257,7 +257,13 @@ bool ReplayPanel::loadScript(const QString& path, QString* err)
         QString msg = raw;
         const auto m = kLogTs.match(msg);
         if (m.hasMatch()) msg = msg.mid(m.capturedLength());
-        m_script.append({ kDefaultGapMs, msg.trimmed() });
+        msg = msg.trimmed();
+        // ⚠ A saved raw log also holds the app's own meta lines —
+        // "[connect] ws://…", "[connected]", "[error] …" — which are not TCI
+        // and used to be replayed to clients as fake commands. TCI never
+        // starts a command with '['.
+        if (msg.isEmpty() || msg.startsWith('[')) continue;
+        m_script.append({ kDefaultGapMs, msg });
     }
     f.close();
     return !m_script.isEmpty();

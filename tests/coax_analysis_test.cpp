@@ -1,9 +1,11 @@
-// coax_analysis_test — validate CoaxAnalysis against the real 2026-08-03 bench
-// data, whose answers were derived independently in Python during the session.
+// coax_analysis_test — validate CoaxAnalysis against closed-form truth.
 //
-// This is a regression test with known-good expectations, not a smoke test:
-// every number below was measured on the G0JKN feedline with a NanoVNA-F V2
-// and cross-checked against a RigExpert AA-170.
+// The sweeps here are SYNTHETIC: open/short input impedances built from an
+// exact lossy-line model (Zin = Z0/tanh(gl), Z0*tanh(gl)), so every recovered
+// number is compared with a known answer rather than with the code's own
+// output. The scenarios — the 88 m DXE-400 run, the VF 0.66-vs-0.85 trap —
+// come from the 2026-08-03 bench session on the G0JKN feedline, but the data
+// itself is generated, not measured.
 
 #include "CoaxAnalysis.h"
 
@@ -97,7 +99,7 @@ int main()
     // the error that made a healthy DXE-400 run look 25-40%% lossy.
     CoaxResult asLmr = analyseOpenShort(oc, sc, *lmr);
     CoaxResult asRg  = analyseOpenShort(oc, sc, *rg);
-    near(asLmr.electricalHalfWaveM, asRg.electricalHalfWaveM, 0.01,
+    near(asLmr.electricalLengthM, asRg.electricalLengthM, 0.01,
          "electrical length is the SAME either way (it is measured)");
     check(asRg.physicalLengthFt < asLmr.physicalLengthFt * 0.85,
           "physical length DIFFERS with the assumed cable (it is inferred)");

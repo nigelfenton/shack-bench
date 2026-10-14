@@ -400,7 +400,7 @@ void InstrumentPanel::onAnalyseCoax()
              .arg(r.meanSpacingMhz, 0, 'f', 4)
              .arg(r.spacingSpreadPct, 0, 'f', 1);
     t << QString("    electrical length   %1 m   [MEASURED]")
-             .arg(r.electricalHalfWaveM, 0, 'f', 2);
+             .arg(r.electricalLengthM, 0, 'f', 2);
     t << QString("    physical length     %1 m = %2 ft   [assumes VF %3]")
              .arg(r.physicalLengthM, 0, 'f', 2)
              .arg(r.physicalLengthFt, 0, 'f', 1)
@@ -632,8 +632,8 @@ void InstrumentPanel::buildCableTab()
     m_plotCable->setUnit(TracePlot::Unit::Ohms);
     m_plotCable->setTitle("Cable bench");
     m_plotCable->setPlaceholder(
-        "Velocity factor: short the far end, sweep WIDE (1–300 MHz), enter the\n"
-        "length, press Measure VF.\n\n"
+        "Velocity factor: short the far end, enter the length, press\n"
+        "Measure VF — it sweeps your CALIBRATED span (dead data outside it).\n\n"
         "Choke: fit the G3TXQ fixture across CH0–CH1 and press Measure choke.\n"
         "See the guide on the right for both.");
     connect(m_plotCable, &TracePlot::cursorMoved,
@@ -1434,8 +1434,6 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
             o << "";
             o << "  ⚠ This figure is only as good as the length you entered.";
             o << "    A 10% length error is a 10% VF error.";
-            o << "  ⚠ Put the sweep back to your calibrated span before doing";
-            o << "    antenna or feedline work — this one ran 1–300 MHz.";
         }
         if (!vf.caution.isEmpty()) { o << ""; o << "  ⚠ " + vf.caution; }
         m_cableReport->setPlainText(o.join('\n'));

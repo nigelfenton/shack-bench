@@ -4,7 +4,12 @@
 ; Locally:
 ;   set TCIMON_VERSION=0.1.0
 ;   set TCIMON_STAGING=C:\path\to\ShackBench-v0.1.0-windows-x64
-;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\tcimonitor.iss
+;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\shackbench.iss
+;
+; The MSVC runtime (msvcp140.dll, vcruntime140*.dll) is deployed APP-LOCAL in
+; the staging directory by the release workflow, so no vc_redist / admin step
+; is needed — PrivilegesRequired=lowest stays true. Staging without those DLLs
+; produces an app that won't start on a PC lacking the VC++ runtime.
 
 #define MyAppName        "Shack-Bench"
 #define MyAppVersion     GetEnv("TCIMON_VERSION")
