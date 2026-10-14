@@ -338,6 +338,7 @@ void InstrumentPanel::onCableTypeChanged(int index)
 
 void InstrumentPanel::onTakeOpenClicked()
 {
+    if (m_busy) return;   // don't re-label a sweep that is already running
     m_capturingOpen = true;
     m_capturingShort = false;
     log("capturing the OPEN sweep — leave the far end DISCONNECTED and clear "
@@ -347,6 +348,7 @@ void InstrumentPanel::onTakeOpenClicked()
 
 void InstrumentPanel::onTakeShortClicked()
 {
+    if (m_busy) return;
     m_capturingShort = true;
     m_capturingOpen = false;
     log("capturing the SHORT sweep — short the SAME far end.");
@@ -497,8 +499,11 @@ void InstrumentPanel::buildTrapTab()
     // and the verification belong next to the thing they are about.
     m_guide = new GuidePanel();
     m_guide->setGuide(trapGuide());
-    connect(m_guide, &GuidePanel::runCommand,
-            this, &InstrumentPanel::onGuideCommand);
+    connect(m_guide, &GuidePanel::runCommand, this,
+            [this](const QString& cmd, const QString& title) {
+                m_activeGuide = m_guide;   // the reply goes back to the asker
+                onGuideCommand(cmd, title);
+            });
 
     auto* guideBar = new QHBoxLayout();
     auto* calBtn = new QPushButton("Calibration guide");
@@ -651,8 +656,11 @@ void InstrumentPanel::buildCableTab()
 
     m_cableGuide = new GuidePanel();
     m_cableGuide->setGuide(velocityFactorGuide());
-    connect(m_cableGuide, &GuidePanel::runCommand,
-            this, &InstrumentPanel::onGuideCommand);
+    connect(m_cableGuide, &GuidePanel::runCommand, this,
+            [this](const QString& cmd, const QString& title) {
+                m_activeGuide = m_cableGuide;
+                onGuideCommand(cmd, title);
+            });
 
     auto* bar = new QHBoxLayout();
     auto* vfBtn = new QPushButton("Velocity factor guide");
@@ -774,8 +782,9 @@ void InstrumentPanel::onGuideCommand(const QString& command,
     for (const auto& id : m_found)
         if (id.kind == InstrumentId::Kind::NanoVna) port = id.port;
     if (port.isEmpty()) {
-        m_guide->commandFinished(
-            false, "no NanoVNA found — press \"Probe instruments\" first");
+        if (m_activeGuide)
+            m_activeGuide->commandFinished(
+                false, "no NanoVNA found — press \"Probe instruments\" first");
         return;
     }
 
@@ -798,7 +807,7 @@ void InstrumentPanel::onGuideCommand(const QString& command,
 
 void InstrumentPanel::onRawCommandDone(bool ok, const QString& reply)
 {
-    if (m_guide) m_guide->commandFinished(ok, reply);
+    if (m_activeGuide) m_activeGuide->commandFinished(ok, reply);
     log(QString("guide: %1%2").arg(ok ? "ok" : "FAILED",
                                    reply.isEmpty() ? QString()
                                                    : " — " + reply));
@@ -1118,6 +1127,7 @@ void InstrumentPanel::buildSpectrumTab()
     m_saStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
     v->addWidget(m_saStatus);
 
+    m_spectrumPage = page;
     m_tabs->addTab(page, "Spectrum");
 }
 
@@ -1225,15 +1235,21 @@ bool InstrumentPanel::txInterlockBlocks(QString* why) const
 
 void InstrumentPanel::onSweepClicked()
 {
+    // A refused sweep must disarm a Feedline OPEN/SHORT capture, or the next
+    // ordinary sweep gets silently filed as the reference.
+    const auto disarmCapture = [this] { m_capturingOpen = m_capturingShort = false; };
+
     QString why;
     if (txInterlockBlocks(&why)) {
+        disarmCapture();
         QMessageBox::warning(this, "Refused — TX is active", why);
         log("REFUSED: " + why);
         return;
     }
-    if (m_busy) return;
+    if (m_busy) return;   // the flags belong to the sweep already running
 
-    const bool spectrum = (m_tabs->currentIndex() == 1);
+    // Compare the page, not an index — tabs get inserted and indices drift.
+    const bool spectrum = (m_tabs->currentWidget() == m_spectrumPage);
 
     if (spectrum) {
         const qint64 a = qint64(m_saFrom->value() * 1e6);
@@ -1242,6 +1258,7 @@ void InstrumentPanel::onSweepClicked()
         for (const auto& id : m_found)
             if (id.kind == InstrumentId::Kind::TinySa) port = id.port;
         if (port.isEmpty()) {
+            disarmCapture();
             log("no tinySA found — press \"Probe instruments\" first.");
             return;
         }
@@ -1256,6 +1273,7 @@ void InstrumentPanel::onSweepClicked()
 
     const QString port = m_antInstrument->currentData().toString();
     if (port.isEmpty()) {
+        disarmCapture();
         log("no antenna analyser selected — press \"Probe instruments\" first.");
         return;
     }
@@ -1264,7 +1282,11 @@ void InstrumentPanel::onSweepClicked()
 
     const qint64 a = qint64(m_antFrom->value() * 1e6);
     const qint64 b = qint64(m_antTo->value() * 1e6);
-    if (b <= a) { log("stop frequency must be above start."); return; }
+    if (b <= a) {
+        disarmCapture();
+        log("stop frequency must be above start.");
+        return;
+    }
 
     setBusy(true);
     if (kind == InstrumentId::Kind::RigExpert) {
@@ -1323,6 +1345,7 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
     setBusy(false);
 
     if (!result.ok && result.points.isEmpty()) {
+        m_capturingOpen = m_capturingShort = false;   // don't stay armed
         m_antStatus->setText("failed");
         log("SWEEP FAILED: " + result.error);
         QMessageBox::warning(this, "Sweep failed", result.error);
@@ -1357,7 +1380,7 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
                       .arg(xWorst, 0, 'f', 2).arg(sMax, 0, 'f', 4)
                       .arg(impossible)
                       .arg(good ? "CAL GOOD" : "CAL SUSPECT — redo it");
-        if (m_guide) m_guide->commandFinished(good, verdict);
+        if (m_activeGuide) m_activeGuide->commandFinished(good, verdict);
         log("guide: " + verdict);
         return;
     }
