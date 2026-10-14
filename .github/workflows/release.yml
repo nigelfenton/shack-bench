@@ -17,8 +17,12 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Least privilege: every job gets a read-only token by default. Only the
+# `release` job, which creates the GitHub Release, is granted write access.
+# In particular the Linux job downloads and executes third-party linuxdeploy
+# binaries, so it must never hold a token that can write to this repository.
 permissions:
-  contents: write   # needed to create the GitHub Release
+  contents: read
 
 env:
   QT_VERSION: '6.8.0'
@@ -50,6 +54,18 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+      # Run the registered suites before anything is packaged, so a failing
+      # test stops the release. Single-config Ninja build, so no -C needed.
+      # install-qt-action puts the Qt bin dir on PATH, so the test exes find
+      # the Qt DLLs. instrument_probe_test needs the bench and is deliberately
+      # not registered with add_test(), so ctest never runs it.
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+        env:
+          # Suites are Qt Core only; offscreen guards a headless runner in
+          # case one ever touches QtGui.
+          QT_QPA_PLATFORM: offscreen
 
       - name: Stage and zip
         shell: pwsh
@@ -152,6 +168,13 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+        env:
+          # Suites are Qt Core only; offscreen guards a headless runner in
+          # case one ever touches QtGui.
+          QT_QPA_PLATFORM: offscreen
+
       - name: Stage AppDir
         run: |
           mkdir -p AppDir/usr/bin
@@ -178,8 +201,11 @@ jobs:
 
       - name: Build AppImage
         run: |
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          # Pinned to tagged releases rather than the rolling "continuous"
+          # builds, so the packaging tool cannot change underneath a release.
+          # This job runs with a read-only token (see top-level permissions).
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
 
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
@@ -191,7 +217,10 @@ jobs:
               --desktop-file AppDir/usr/share/applications/tcimonitor.desktop \
               --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/tcimonitor.png
 
-          version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
+          # Tags (v*) name the artifact; anything else (a branch run, whose
+          # name can contain "/") is dev-<sha>, matching the Windows job.
+          version="${GITHUB_REF_NAME}"
+          case "$version" in v*) ;; *) version="dev-${GITHUB_SHA:0:7}" ;; esac
           # linuxdeploy names the AppImage from the desktop file's Name= field,
           # which is "Shack-Bench". The glob here still said TCI*Monitor* — the
           # name this project had before it was renamed — so the mv found
@@ -244,11 +273,21 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+        env:
+          # Suites are Qt Core only; offscreen guards a headless runner in
+          # case one ever touches QtGui.
+          QT_QPA_PLATFORM: offscreen
+
       - name: macdeployqt + DMG
         run: |
           "$QT_ROOT_DIR/bin/macdeployqt" build/ShackBench.app
 
-          version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
+          # Tags (v*) name the artifact; anything else (a branch run, whose
+          # name can contain "/") is dev-<sha>, matching the Windows job.
+          version="${GITHUB_REF_NAME}"
+          case "$version" in v*) ;; *) version="dev-${GITHUB_SHA:0:7}" ;; esac
           dmg_name="ShackBench-${version}-macos-arm64.dmg"
 
           mkdir -p dmg-stage
@@ -272,6 +311,9 @@ jobs:
     needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    # The only job that needs to write: it creates the GitHub Release.
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
