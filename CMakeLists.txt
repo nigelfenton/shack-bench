@@ -269,3 +269,13 @@ target_link_libraries(tx_gate_test PRIVATE Qt6::Core Qt6::Network Qt6::WebSocket
 set_target_properties(tx_gate_test PROPERTIES AUTOMOC ON)
 add_test(NAME tx_gate_test COMMAND tx_gate_test)
 
+# ── Instrument reply parsing (no hardware) ───────────────────────────────
+add_executable(instrument_parse_test
+    tests/instrument_parse_test.cpp
+    src/Instrument.cpp
+)
+target_include_directories(instrument_parse_test PRIVATE src)
+target_link_libraries(instrument_parse_test PRIVATE Qt6::Core Qt6::SerialPort)
+set_target_properties(instrument_parse_test PROPERTIES AUTOMOC ON)
+add_test(NAME instrument_parse_test COMMAND instrument_parse_test)
+

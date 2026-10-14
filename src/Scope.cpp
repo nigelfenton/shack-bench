@@ -254,17 +254,56 @@ QString findScopeResource(QString* log)
     return hit;
 }
 
-QVector<double> decodeChannel(const QByteArray& payload, int channelIndex,
+int interleaveSlot(const QVector<ScopeChannel>& channels, int index)
+{
+    int slot = 0;
+    for (const ScopeChannel& c : channels) {
+        if (!c.enabled) continue;
+        ++slot;
+        if (c.index == index) return slot;
+    }
+    return 0;
+}
+
+bool extractWaveformPayload(const QByteArray& buf, QByteArray* payload,
+                            QString* error)
+{
+    constexpr int kHeader = 11;     // '#9' + 9-digit block length
+    constexpr int kDataAt = 128;    // metadata runs to here, samples follow
+    auto fail = [&](const QString& why) {
+        if (error) *error = why;
+        return false;
+    };
+    if (buf.size() < kHeader || buf.at(0) != '#' || buf.at(1) != '9')
+        return fail(QString("not a #9 block (header '%1', %2 bytes)")
+                        .arg(QString::fromLatin1(buf.left(2))).arg(buf.size()));
+    bool ok = false;
+    const qint64 declared = buf.mid(2, 9).toLongLong(&ok);
+    if (!ok || declared <= 0)
+        return fail(QString("bad block length '%1'")
+                        .arg(QString::fromLatin1(buf.mid(2, 9))));
+    if (kHeader + declared <= kDataAt)
+        return fail(QString("block of %1 bytes holds no samples").arg(declared));
+    if (buf.size() < kHeader + declared)
+        return fail(QString("truncated transfer: %1 of %2 declared bytes "
+                            "arrived").arg(buf.size() - kHeader).arg(declared));
+    if (payload)
+        *payload = buf.mid(kDataAt, int(kHeader + declared - kDataAt));
+    return true;
+}
+
+QVector<double> decodeChannel(const QByteArray& payload, int slot,
                               int enabledChannels, double voltsPerDiv,
                               double offsetV, int blockLen)
 {
     QVector<double> out;
-    if (payload.isEmpty() || enabledChannels < 1 || channelIndex < 1) return out;
+    if (payload.isEmpty() || enabledChannels < 1 || slot < 1
+        || slot > enabledChannels) return out;
 
     // Blocks round-robin between the enabled channels.
     const int stride = blockLen * enabledChannels;
     const int size = int(payload.size());
-    for (int start = (channelIndex - 1) * blockLen; start < size;
+    for (int start = (slot - 1) * blockLen; start < size;
          start += stride) {
         const int n = std::min(blockLen, size - start);
         for (int k = 0; k < n; ++k) {
@@ -364,7 +403,19 @@ void ScopeWorker::capture(const QString& resource)
     for (int c = 1; c <= 2; ++c) {
         ScopeChannel ch;
         ch.index = c;
-        ch.enabled = s.query(QString(":CHANnel%1:DISPlay?").arg(c)) == "1";
+        // ⚠ A failed or timed-out query returns "" — which used to count as
+        // "disabled", silently changing the de-interleave stride and mixing
+        // CH1/CH2 samples. Only an explicit 0/1 is believed.
+        const QString disp = s.query(QString(":CHANnel%1:DISPlay?").arg(c));
+        if (disp != "0" && disp != "1") {
+            out.error = QString("could not read whether CH%1 is on (the scope "
+                                "answered '%2'); refusing to guess, because "
+                                "the sample layout depends on it")
+                            .arg(c).arg(disp);
+            emit finished(out);
+            return;
+        }
+        ch.enabled = disp == "1";
         ch.voltsPerDiv = s.query(QString(":CHANnel%1:SCALe?").arg(c)).toDouble();
         ch.offsetV = s.query(QString(":CHANnel%1:OFFSet?").arg(c)).toDouble();
         ch.probe = s.query(QString(":CHANnel%1:PROBe?").arg(c)).toDouble();
@@ -419,24 +470,21 @@ void ScopeWorker::capture(const QString& resource)
         if (more.isEmpty()) break;
         buf += more;
     }
-    if (buf.size() < 129 || buf.at(0) != '#' || buf.at(1) != '9') {
-        out.error = QString("unexpected waveform reply: %1 bytes, header '%2', "
-                            "declared %3, viRead status 0x%4")
-                        .arg(buf.size())
-                        .arg(QString::fromLatin1(buf.left(2)))
-                        .arg(buf.size() >= 11 ? buf.mid(2, 9) : QByteArray("?"))
+    // #9 + 9-digit block length + 9-digit total + 9-digit cursor, then the
+    // metadata runs to byte 128 and the samples follow.
+    QByteArray payload;
+    QString why;
+    if (!extractWaveformPayload(buf, &payload, &why)) {
+        out.error = QString("unexpected waveform reply: %1 (viRead status 0x%2)")
+                        .arg(why)
                         .arg(quint32(s.lastStatus()), 8, 16, QChar('0'));
         emit finished(out);
         return;
     }
-
-    // #9 + 9-digit block length + 9-digit total + 9-digit cursor, then the
-    // metadata runs to byte 128 and the samples follow.
-    const QByteArray payload = buf.mid(128);
     for (auto& ch : out.channels) {
         if (!ch.enabled) continue;
-        ch.volts = decodeChannel(payload, ch.index, enabled, ch.voltsPerDiv,
-                                 ch.offsetV);
+        ch.volts = decodeChannel(payload, interleaveSlot(out.channels, ch.index),
+                                 enabled, ch.voltsPerDiv, ch.offsetV);
         computeMeasurements(&ch, out.secondsPerSample());
     }
 

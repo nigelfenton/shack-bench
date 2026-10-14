@@ -78,6 +78,26 @@ QStringList command(QSerialPort& sp, const QString& cmd,
 constexpr const char* kCancelled = "cancelled by the operator — partial data "
                                    "discarded";
 
+} // namespace
+
+bool parseComplexPair(const QString& line, double* re, double* im)
+{
+    // Exactly two numeric tokens. ⚠ toDouble() without an ok-check turned any
+    // stray two-token line (a prompt merged with an echo) into Γ = 0 — a
+    // perfect SWR 1.0 point plotted as if measured.
+    const QStringList t = line.split(' ', Qt::SkipEmptyParts);
+    if (t.size() != 2) return false;
+    bool okR = false, okI = false;
+    const double r = t[0].toDouble(&okR);
+    const double i = t[1].toDouble(&okI);
+    if (!okR || !okI || !std::isfinite(r) || !std::isfinite(i)) return false;
+    if (re) *re = r;
+    if (im) *im = i;
+    return true;
+}
+
+namespace {
+
 bool openPort(QSerialPort& sp, const QString& port, int baud, QString* err)
 {
     sp.setPortName(port);
@@ -334,14 +354,12 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     const QStringList data = command(sp, "data 0", 30000, 2500, &m_cancel);
 
     const int n = std::min(freqs.size(), data.size());
-    int impossible = 0;
+    int impossible = 0, unparsed = 0;
     for (int i = 0; i < n && !m_cancel; ++i) {
         bool okHz = false;
         const qint64 hz = freqs[i].toLongLong(&okHz);
-        const QStringList ri = data[i].split(' ', Qt::SkipEmptyParts);
-        if (!okHz || ri.size() < 2) continue;
-        const double re = ri[0].toDouble();
-        const double im = ri[1].toDouble();
+        double re = 0.0, im = 0.0;
+        if (!okHz || !parseComplexPair(data[i], &re, &im)) { ++unparsed; continue; }
         const double g  = std::hypot(re, im);
         if (g >= 1.0) ++impossible;
 
@@ -376,6 +394,22 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
                                 "probably open, or the calibration does not "
                                 "cover this span. Treat this sweep as invalid.")
                             .arg(impossible).arg(res.points.size());
+        }
+        // ⚠ Pairing is by index. If the two lists differ in length, or lines
+        // were dropped, every later point may sit at the wrong frequency —
+        // say so instead of plotting a silently shifted trace.
+        QStringList warn;
+        if (freqs.size() != data.size())
+            warn << QString("the instrument returned %1 frequencies but %2 S11 "
+                            "points; points were paired by position and may be "
+                            "shifted — re-sweep")
+                        .arg(freqs.size()).arg(data.size());
+        if (unparsed > 0)
+            warn << QString("%1 S11 line(s) could not be parsed and were "
+                            "skipped").arg(unparsed);
+        if (!warn.isEmpty()) {
+            if (!res.error.isEmpty()) warn.prepend(res.error);
+            res.error = warn.join("; ");
         }
     }
     emit finished(res);
@@ -450,10 +484,8 @@ void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
             hz = freqs[i].toLongLong(&okHz);
             if (!okHz) continue;
         }
-        const QStringList ri = data[i].split(' ', Qt::SkipEmptyParts);
-        if (ri.size() < 2) continue;
-        const double re = ri[0].toDouble();
-        const double im = ri[1].toDouble();
+        double re = 0.0, im = 0.0;
+        if (!parseComplexPair(data[i], &re, &im)) continue;
         const double mag = std::hypot(re, im);
 
         SweepPoint pt;
