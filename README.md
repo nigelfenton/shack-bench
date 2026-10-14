@@ -16,7 +16,7 @@ bench test instruments:
 
 ## Status
 
-**v0.5.2** (2026-10-14) adds fixes found on the bench: Stop no longer raises a failure dialog, a failed or stopped sweep can't leave a trap/VF/choke capture armed, and the NanoVNA calibration guide now actually saves to slot 0 (after the verify).  **v0.5.1** (2026-10-14) was a fixes release: TX safety in the console and
+**v0.5.3** (2026-10-14) records the NanoVNA's real calibrated span (taken from the calibration guide, instead of misreading the previous sweep's span) and adds a Stop button to the Trap, Cable and Feedline tabs.  **v0.5.2** (2026-10-14) added fixes found on the bench: Stop no longer raises a failure dialog, a failed or stopped sweep can't leave a trap/VF/choke capture armed, and the NanoVNA calibration guide now actually saves to slot 0 (after the verify).  **v0.5.1** (2026-10-14) was a fixes release: TX safety in the console and
 TX Cal (no path can leave the radio keyed), corrected trap and choke
 maths, instrument Stop that actually stops, scope/NanoVNA parsing fixes,
 and a Windows package that bundles the VC++ runtime.  v0.5.0 (2026-08-27)
