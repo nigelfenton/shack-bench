@@ -2,6 +2,7 @@
 
 #include "TciClient.h"
 #include "TciCommands.h"
+#include "TxGate.h"
 
 #include <QCheckBox>
 #include <QCompleter>
@@ -18,6 +19,8 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace TciMon {
 
@@ -42,6 +45,13 @@ ConsolePanel::ConsolePanel(TciClient* tci, QWidget* parent)
     m_watchdog->setSingleShot(true);
     connect(m_watchdog, &QTimer::timeout,
             this, &ConsolePanel::onWatchdogTimeout);
+    // Link lost while keyed: the watchdog's unkey would go into a dead
+    // socket. Abort now — TciClient queues the unkey for the reconnect.
+    if (m_tci) {
+        connect(m_tci, &TciClient::connectionChanged, this, [this](bool up) {
+            if (!up) releaseTx("TCI link lost while keyed");
+        });
+    }
 
     auto* v = new QVBoxLayout(this);
     v->setContentsMargins(4, 4, 4, 4);
@@ -77,7 +87,9 @@ ConsolePanel::ConsolePanel(TciClient* tci, QWidget* parent)
         m_txTimeout->setValue(10);
 
         m_unkeyBtn = new QPushButton("UNKEY NOW");
-        m_unkeyBtn->setEnabled(false);
+        m_unkeyBtn->setToolTip(
+            "Sends trx/tune false for every receiver this console keyed.\n"
+            "Always available — unkeying is safe even when disarmed.");
         m_unkeyBtn->setStyleSheet(
             "QPushButton { background: #400000; color: #ff8080; "
             "font-weight: bold; border: 1px solid #ff5050; padding: 4px 10px; }"
@@ -146,21 +158,10 @@ ConsolePanel::~ConsolePanel()
     delete m_sinceSend;
 }
 
-bool ConsolePanel::isTxClass(const QString& cmd)
+void ConsolePanel::releaseTx(const QString& reason)
 {
-    // Commands that can put RF on the antenna.
-    return cmd == "trx" || cmd == "tune";
-}
-
-bool ConsolePanel::isKeyDown(const QString& cmd, const QString& args)
-{
-    if (cmd != "trx" && cmd != "tune") return false;
-    // trx:0,true; / tune:0,true; — a "true" argument keys the carrier.
-    const QStringList parts = args.split(',', Qt::SkipEmptyParts);
-    for (const QString& p : parts)
-        if (p.trimmed().compare("true", Qt::CaseInsensitive) == 0)
-            return true;
-    return false;
+    if (!m_keyedRx.isEmpty() || m_cwSent || m_watchdog->isActive())
+        doAbort(reason);
 }
 
 void ConsolePanel::appendLine(const QString& text, const QString& colorHex)
@@ -188,8 +189,9 @@ void ConsolePanel::onArmToggled(bool checked)
         }
     }
     m_armed = checked;
-    m_unkeyBtn->setEnabled(checked);
-    if (!checked && m_watchdog->isActive()) m_watchdog->stop();
+    // ⚠ Disarming while keyed used to just stop the watchdog — and disable
+    // UNKEY — leaving the carrier up with nothing left to drop it.
+    if (!checked) releaseTx("disarmed while keyed");
     refreshBanner();
     appendLine(checked ? "[armed] live sending enabled"
                        : "[safe] dry-run — nothing is transmitted",
@@ -219,13 +221,12 @@ void ConsolePanel::onSend()
     if (text.isEmpty()) return;
     if (!text.endsWith(';')) text += ';';
 
-    const int colon = text.indexOf(':');
-    const int semi  = text.indexOf(';');
-    const QString cmd =
-        (colon < 0 ? text.left(semi) : text.left(colon)).trimmed().toLower();
-    const QString args = (colon < 0 || semi < 0)
-        ? QString()
-        : text.mid(colon + 1, semi - colon - 1);
+    // The line goes out verbatim, so classify EVERY command on it.
+    const QVector<TciCommandPart> cmds = splitTciCommands(text);
+    if (cmds.isEmpty()) return;
+    bool txClass = false;
+    for (const TciCommandPart& c : cmds)
+        txClass = txClass || isTxClassCommand(c.name);
 
     if (!m_armed) {
         appendLine(QString("DRY-RUN  would send: %1").arg(text), "#ffaa00");
@@ -233,7 +234,7 @@ void ConsolePanel::onSend()
         return;
     }
 
-    if (isTxClass(cmd)) {
+    if (txClass) {
         const auto r = QMessageBox::warning(this, "Confirm TX-class command",
             QString("This is a transmit-capable command:\n\n    %1\n\n"
                     "It can key your radio. Send it?").arg(text),
@@ -244,22 +245,33 @@ void ConsolePanel::onSend()
         }
     }
 
-    m_tci->send(text);
+    if (!m_tci || !m_tci->send(text)) {
+        appendLine(QString("NOT SENT (not connected)  %1").arg(text), "#ff5050");
+        return;
+    }
     m_sinceSend->restart();
     appendLine(QString("SENT  %1").arg(text), "#4cff7c");
     m_cmdEdit->clear();
 
-    if (isKeyDown(cmd, args)) {
-        m_keyed = true;
+    // Track key state command by command, in order, per receiver.
+    bool keyedNow = false;
+    for (const TciCommandPart& c : cmds) {
+        const int down = keyDownRx(c);
+        if (down >= 0) { m_keyedRx.insert(down); keyedNow = true; }
+        if (isCwSend(c.name) && down >= 0) m_cwSent = true;
+        const int up = keyUpRx(c);
+        if (up >= 0) m_keyedRx.remove(up);
+    }
+
+    if (keyedNow) {
         m_watchdog->start(m_txTimeout->value() * 1000);
         appendLine(QString("watchdog armed — auto-unkey on SWR>%1 or %2 s")
                        .arg(m_swrLimit->value(), 0, 'f', 1)
                        .arg(m_txTimeout->value()),
                    "#ffaa00");
-    } else if ((cmd == "trx" || cmd == "tune") && m_watchdog->isActive()) {
-        // An explicit unkey clears a running watchdog.
+    } else if (m_keyedRx.isEmpty() && !m_cwSent && m_watchdog->isActive()) {
+        // An explicit unkey of everything we keyed clears the watchdog.
         m_watchdog->stop();
-        m_keyed = false;
     }
 }
 
@@ -276,14 +288,33 @@ void ConsolePanel::onUnkeyNow()
 void ConsolePanel::doAbort(const QString& reason)
 {
     m_watchdog->stop();
-    m_keyed = false;
-    if (m_tci) {
-        m_tci->send("trx:0,false;");
-        m_tci->send("tune:0,false;");
+    // Every receiver we keyed, plus 0 — the default an unkey always covers.
+    QSet<int> rxs = m_keyedRx;
+    rxs.insert(0);
+    m_keyedRx.clear();
+    const bool cw = m_cwSent;
+    m_cwSent = false;
+
+    QList<int> sorted(rxs.begin(), rxs.end());
+    std::sort(sorted.begin(), sorted.end());
+    QStringList names;
+    for (int rx : sorted) names << QString::number(rx);
+
+    const bool sent = m_tci && m_tci->sendUnkey(rxs);
+    if (sent && cw) m_tci->send("cw_macros_stop;");
+    if (sent) {
+        appendLine(QString("ABORT (%1) — sent trx/tune false for rx %2%3")
+                       .arg(reason, names.join(','),
+                            cw ? " + cw_macros_stop" : ""),
+                   "#ff5050");
+    } else {
+        // ⚠ Never claim "sent" into a dead socket. TciClient holds the unkey
+        // and sends it first when the link comes back.
+        appendLine(QString("ABORT (%1) — link DOWN, unkey NOT sent; queued "
+                           "for rx %2 on reconnect. Check the radio!")
+                       .arg(reason, names.join(',')),
+                   "#ff5050");
     }
-    appendLine(QString("ABORT (%1) — sent trx:0,false; tune:0,false;")
-                   .arg(reason),
-               "#ff5050");
 }
 
 void ConsolePanel::noteIncoming(const QString& line)
@@ -293,7 +324,8 @@ void ConsolePanel::noteIncoming(const QString& line)
         (colon < 0 ? line : line.left(colon)).trimmed().toLower();
 
     // Watchdog: tx_sensors:0,mic,fwd,peak,swr — abort over the SWR limit.
-    if (m_keyed && cmd == "tx_sensors" && colon >= 0) {
+    if ((!m_keyedRx.isEmpty() || m_cwSent) && cmd == "tx_sensors"
+        && colon >= 0) {
         const QStringList a = line.mid(colon + 1).split(',');
         if (a.size() >= 5) {
             bool ok = false;

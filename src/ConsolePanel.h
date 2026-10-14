@@ -7,11 +7,18 @@
 //
 //   • Dry-run by default.  The arm state is NOT persisted and resets to
 //     OFF every launch — you must consciously arm sending each session.
-//   • TX-class commands (trx, tune) require a second explicit confirm.
+//   • TX-class commands (trx, tune, cw_msg, cw_macros) require a second
+//     explicit confirm. EVERY command on a line is checked — the line is
+//     sent verbatim, so `vfo:…;trx:0,true;` must not pass as a `vfo`.
 //   • Keying a carrier starts a watchdog: if SWR exceeds a limit, or TX
-//     persists past a timeout, it auto-sends trx:0,false; tune:0,false;.
-//   • An always-available "UNKEY NOW" button does the same on demand.
+//     persists past a timeout, it auto-unkeys every receiver it keyed.
+//   • An always-available "UNKEY NOW" button does the same on demand —
+//     enabled even when disarmed, because unkeying is always safe.
+//   • Disarming, disconnecting, losing the link or closing the app while
+//     keyed unkeys too. If the link is down the unkey is queued in TciClient
+//     and sent first on reconnect, and the log says so rather than "sent".
 
+#include <QSet>
 #include <QWidget>
 #include <QString>
 
@@ -39,6 +46,10 @@ public:
     // transcript can correlate replies to a recent send.
     void noteIncoming(const QString& line);
 
+    // The app is about to stop being in control (close, Disconnect): unkey
+    // if this panel keyed anything. No-op otherwise.
+    void releaseTx(const QString& reason);
+
 private slots:
     void onSend();
     void onArmToggled(bool checked);
@@ -46,8 +57,6 @@ private slots:
     void onWatchdogTimeout();
 
 private:
-    static bool isTxClass(const QString& cmd);
-    static bool isKeyDown(const QString& cmd, const QString& args);
     void appendLine(const QString& text, const QString& colorHex);
     void doAbort(const QString& reason);
     void refreshBanner();
@@ -66,7 +75,8 @@ private:
     QTimer*         m_watchdog{};
     QElapsedTimer*  m_sinceSend{};
     bool            m_armed{false};
-    bool            m_keyed{false};   // a carrier-up command is outstanding
+    QSet<int>       m_keyedRx;        // receivers with a carrier-up outstanding
+    bool            m_cwSent{false};  // a CW send may still be keying
 };
 
 } // namespace TciMon

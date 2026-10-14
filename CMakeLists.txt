@@ -90,6 +90,8 @@ set(TCIMON_SOURCES
     src/InspectorPanel.h
     src/ConsolePanel.cpp
     src/ConsolePanel.h
+    src/TxGate.cpp
+    src/TxGate.h
     src/ComparePanel.cpp
     src/ComparePanel.h
     src/ReplayPanel.cpp
@@ -253,4 +255,17 @@ target_include_directories(cable_tests_test PRIVATE src)
 target_link_libraries(cable_tests_test PRIVATE Qt6::Core Qt6::SerialPort)
 set_target_properties(cable_tests_test PROPERTIES AUTOMOC ON)
 add_test(NAME cable_tests_test COMMAND cable_tests_test)
+
+# ── TX safety gate (console command gating + queued unkey) ───────────────
+# The unkey half runs a loopback QWebSocketServer — no radio, no network.
+add_executable(tx_gate_test
+    tests/tx_gate_test.cpp
+    src/TxGate.cpp
+    src/TciClient.cpp
+    src/TciClient.h
+)
+target_include_directories(tx_gate_test PRIVATE src)
+target_link_libraries(tx_gate_test PRIVATE Qt6::Core Qt6::Network Qt6::WebSockets)
+set_target_properties(tx_gate_test PROPERTIES AUTOMOC ON)
+add_test(NAME tx_gate_test COMMAND tx_gate_test)
 

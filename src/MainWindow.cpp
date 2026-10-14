@@ -15,6 +15,7 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -116,6 +117,18 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::closeEvent(QCloseEvent* e)
+{
+    // ⚠ There was no close hook at all: closing mid-TX-Cal or with the
+    // console keyed tore the socket down with no unkey ever sent, leaving
+    // PTT up to the server's drop behaviour. Unkey first, then flush so the
+    // frames are on the wire before the destructor aborts the socket.
+    if (m_console) m_console->releaseTx("app closing");
+    if (m_cal)     m_cal->releaseTx("app closing");
+    m_tci->flush();
+    QMainWindow::closeEvent(e);
+}
 
 // ── UI ────────────────────────────────────────────────────────────────────
 
@@ -420,6 +433,9 @@ void MainWindow::onConnectClicked()
 void MainWindow::onDisconnectClicked()
 {
     appendLog("[disconnect] user requested", kColorMeta);
+    // Unkey while the link is still up — after it, the unkey can only queue.
+    if (m_console) m_console->releaseTx("user disconnect");
+    if (m_cal)     m_cal->releaseTx("user disconnect");
     m_tci->disconnectFromServer();
 }
 

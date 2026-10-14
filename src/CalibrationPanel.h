@@ -48,6 +48,10 @@ public:
     // the SWR watchdog can fault.
     void noteIncoming(const QString& line);
 
+    // The app is about to stop being in control (close, Disconnect): abort a
+    // live run, which unkeys. No-op when idle.
+    void releaseTx(const QString& reason);
+
 private slots:
     void onArmToggled(bool checked);
     void onStartClicked();
@@ -84,7 +88,7 @@ private:
     void finishPass();
     void concludeRun(int recGain);
     void abort(const QString& reason);
-    void unkey();
+    bool unkey();   // false = link down, unkey queued for the reconnect
     Row  recordPoint();
     int  kneeGain(const QVector<Row>& rows) const;   // -1 if none qualifies
     void redrawPlot();

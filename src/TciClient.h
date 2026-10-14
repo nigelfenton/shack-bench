@@ -13,6 +13,7 @@
 
 #include <QByteArray>
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QUrl>
 
@@ -30,8 +31,20 @@ public:
     void connectToServer(const QString& host, quint16 port);
     void disconnectFromServer();
 
-    void send(const QString& cmd);   // surface for ad-hoc command testing
+    // Returns false — and sends nothing — when the link is down. Callers that
+    // log "sent" must check it rather than claim a send that never happened.
+    bool send(const QString& cmd);   // surface for ad-hoc command testing
     void sendBinary(const QByteArray& frame);   // TCI TX-audio frames
+
+    // Unkey (trx + tune false) the given receivers. Sent now if connected;
+    // otherwise QUEUED and sent first thing on the next connect, ahead of
+    // `start;`. Returns true only if it went out now. ⚠ An unkey must never
+    // be silently dropped — a keyed radio is the one state we can't leave.
+    bool sendUnkey(const QSet<int>& receivers = {0});
+
+    // Push anything queued on the socket out now — used on app close, where
+    // the socket is torn down before the event loop could write it.
+    void flush();
 
     bool    connected() const { return m_connected; }
     QUrl    currentUrl() const { return m_url; }
@@ -62,6 +75,7 @@ private:
     bool    m_connected{false};
     int     m_reconnectAttempts{0};
     QString m_lastError;
+    QSet<int> m_pendingUnkey;   // receivers to unkey on the next connect
 };
 
 } // namespace TciMon
