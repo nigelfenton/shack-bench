@@ -20,6 +20,7 @@
 //     a bad cal or an open port, not a bad antenna.
 //  5. Restore the instrument's previous state and leave RF OFF on finish.
 
+#include <QPointer>
 #include <QWidget>
 #include <QVector>
 #include <QString>
@@ -127,6 +128,7 @@ private:
     QPushButton*    m_saSweep = nullptr;
     QLabel*         m_saStatus = nullptr;
     TracePlot*      m_plotSa = nullptr;
+    QWidget*        m_spectrumPage = nullptr;   // compared, never indexed
 
     // --- feedline tab (open/short pair) ---
     QComboBox*      m_cableType = nullptr;
@@ -178,6 +180,10 @@ private:
     bool            m_capturingVf = false;
     bool            m_capturingChoke = false;
     bool            m_verifyingCal = false;
+
+    // Whichever guide (Trap or Cable) issued the command in flight — its
+    // reply must go back to that one, not always to the Trap guide.
+    QPointer<GuidePanel> m_activeGuide;
 
     // --- shared ---
     QListWidget*    m_library = nullptr;
