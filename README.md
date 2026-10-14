@@ -277,6 +277,8 @@ Amplitude vs frequency from the tinySA.  The driver reads the sweep range
 clamps an over-range request (ask for 6 GHz, get 0.1–350 MHz), and the
 panel says so.
 
+![Instruments → Spectrum — a live tinySA scan, 0.1–30 MHz with no antenna attached: the noise floor near −97 dBm, the provenance line, and the clamping note](docs/instruments-spectrum.png)
+
 #### Scope
 
 Waveform capture from the Hantek DSO2D15, with Export CSV (with a full
