@@ -61,7 +61,7 @@ int main(int argc, char* argv[])
     QApplication::setOrganizationName("G0JKN");
     QApplication::setOrganizationDomain("g0jkn.uk");
     QApplication::setApplicationName("Shack-Bench");
-    QApplication::setApplicationVersion("0.5.1");
+    QApplication::setApplicationVersion("0.5.2");
 
     QApplication app(argc, argv);
 
