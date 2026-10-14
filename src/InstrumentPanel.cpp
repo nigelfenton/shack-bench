@@ -1365,8 +1365,26 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
 {
     setBusy(false);
 
-    if (!result.ok && result.points.isEmpty()) {
-        m_capturingOpen = m_capturingShort = false;   // don't stay armed
+    // A Stop, or a failure, must disarm EVERY special-purpose capture.
+    // ⚠ Only open/short used to be cleared: a failed or cancelled trap, VF,
+    // choke or cal-verify sweep left its flag set, so the NEXT ordinary sweep
+    // was analysed as a trap/VF/choke — and the cal guide's verify step sat on
+    // "running…" for ever because nothing answered it.
+    if (result.cancelled || (!result.ok && result.points.isEmpty())) {
+        const bool wasVerify = m_verifyingCal;
+        m_capturingOpen = m_capturingShort = false;
+        m_capturingTrap = m_capturingVf = m_capturingChoke = false;
+        m_verifyingCal = false;
+        if (wasVerify && m_activeGuide)
+            m_activeGuide->commandFinished(false, result.error);
+
+        if (result.cancelled) {
+            // The operator asked for this — report it, don't alarm them with
+            // the same modal a real failure gets.
+            m_antStatus->setText("cancelled");
+            log("sweep cancelled: " + result.error);
+            return;
+        }
         m_antStatus->setText("failed");
         log("SWEEP FAILED: " + result.error);
         QMessageBox::warning(this, "Sweep failed", result.error);

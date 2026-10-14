@@ -297,6 +297,7 @@ void SweepWorker::runRigExpertSweep(const QString& port, qint64 fromHz,
     sp.close();
 
     if (m_cancel) {
+        res.cancelled = true;
         res.error = QString(kCancelled) + "; OFF sent, RF is off";
     } else if (res.points.isEmpty()) {
         res.error = "the analyser accepted the commands but returned no "
@@ -380,6 +381,7 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     sp.close();
 
     if (m_cancel) {
+        res.cancelled = true;
         res.error = kCancelled;
     } else if (res.points.isEmpty()) {
         res.error = "no S11 data returned";
@@ -500,6 +502,7 @@ void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
     sp.close();
 
     if (m_cancel) {
+        res.cancelled = true;
         res.error = kCancelled;
     } else if (res.points.isEmpty()) {
         res.error = "no S21 data returned";
@@ -579,7 +582,7 @@ void SweepWorker::runTinySaSweep(const QString& port, qint64 fromHz,
     }
     sp.close();
 
-    if (m_cancel) res.error = kCancelled;
+    if (m_cancel) { res.cancelled = true; res.error = kCancelled; }
     else if (res.points.isEmpty()) res.error = "no spectrum data returned";
     else res.ok = true;
     emit finished(res);
