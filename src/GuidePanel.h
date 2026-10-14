@@ -66,7 +66,9 @@ signals:
 
 public slots:
     // Result of the command the panel last asked for.
-    void commandFinished(bool ok, const QString& reply);
+    // A step with `verify`/`expect` takes two rounds: the action, then the
+    // verify command whose reply must contain `expect`.
+    void commandFinished(bool ok, QString reply);
 
 private slots:
     void onNext();
@@ -79,6 +81,7 @@ private:
     Guide          m_guide;
     int            m_index = 0;
     bool           m_actionDone = false;
+    bool           m_verifyPending = false;   // action done, verify in flight
     QString        m_lastReply;
 
     QLabel*        m_heading = nullptr;

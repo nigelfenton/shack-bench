@@ -359,7 +359,9 @@ void MdnsBrowser::parseResponse(const QByteArray& d, const QHostAddress& /*from*
                              (quint8(d[rdStart + 1]) << 16) |
                              (quint8(d[rdStart + 2]) <<  8) |
                               quint8(d[rdStart + 3]);
-                aRecords.insert(rname, QHostAddress(ip));
+                // DNS names are case-insensitive; the SRV target and the A
+                // record's name need not match in case.
+                aRecords.insert(rname.toLower(), QHostAddress(ip));
             }
             break;
         }
@@ -370,24 +372,49 @@ void MdnsBrowser::parseResponse(const QByteArray& d, const QHostAddress& /*from*
     }
 
     // Resolve and emit.
+    //
+    // ⚠ MERGE into what we already know. Responders routinely split a
+    // service across packets (a TXT-only update, an A-only announcement);
+    // replacing the whole record wiped a known radio's host, port and IP, so
+    // Discovery showed a blank address and "Use" did nothing.
+    constexpr int kMaxServices = 256;   // any LAN host can send these
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     for (auto it = pending.constBegin(); it != pending.constEnd(); ++it) {
         const Pending& p = it.value();
         if (p.instance.isEmpty()) continue;
 
-        TciService s;
-        s.instance   = p.instance;
-        s.hostname   = p.hostname;
-        s.port       = p.port;
-        s.txt        = p.txt;
-        s.lastSeenMs = nowMs;
-        if (!p.hostname.isEmpty() && aRecords.contains(p.hostname))
-            s.address = aRecords.value(p.hostname);
+        const bool isNew = !m_services.contains(p.instance);
+        if (isNew && m_services.size() >= kMaxServices) continue;
 
-        bool isNew = !m_services.contains(s.instance);
+        TciService s = m_services.value(p.instance);
+        s.instance   = p.instance;
+        if (!p.hostname.isEmpty()) {          // this packet carried the SRV
+            s.hostname = p.hostname;
+            s.port     = p.port;
+        }
+        if (!p.txt.isEmpty()) s.txt = p.txt;
+        s.lastSeenMs = nowMs;
+        const QString host = s.hostname.toLower();
+        if (!host.isEmpty() && aRecords.contains(host))
+            s.address = aRecords.value(host);
+
         m_services.insert(s.instance, s);
         if (isNew) emit serviceFound(s);
         else       emit serviceUpdated(s);
+    }
+
+    // An A-only packet (no SRV/TXT) still refreshes a known service's IP.
+    if (!aRecords.isEmpty()) {
+        for (auto it = m_services.begin(); it != m_services.end(); ++it) {
+            if (pending.contains(it.key())) continue;   // handled above
+            const QString host = it->hostname.toLower();
+            if (host.isEmpty() || !aRecords.contains(host)) continue;
+            const QHostAddress a = aRecords.value(host);
+            if (a == it->address) continue;
+            it->address = a;
+            it->lastSeenMs = nowMs;
+            emit serviceUpdated(*it);
+        }
     }
 }
 

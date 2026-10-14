@@ -1149,6 +1149,14 @@ void InstrumentPanel::onProbeClicked()
     // The probe opens serial ports and waits on replies, so it must not run on
     // the GUI thread — doing so froze the whole window for the duration and
     // made a 3 s probe feel broken rather than slow.
+    //
+    // ⚠ Not while a sweep is running: the probe would either fail to open the
+    // busy port (and then drop the analyser from the list) or write ID
+    // commands into an instrument mid-sweep.
+    if (m_busy) {
+        log("a sweep is running — stop it or let it finish before probing.");
+        return;
+    }
     log("probing serial ports (read-only; no sweep is started)…");
     QApplication::setOverrideCursor(Qt::BusyCursor);
 
@@ -1352,8 +1360,11 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
         return;
     }
 
-    m_live = result;
-    m_live.antennaNote = m_antNote->text().trimmed();
+    // ⚠ m_live is what the Antenna tab shows AND what Save/Export write, so it
+    // is only replaced by a sweep that is displayed there — further down,
+    // after the special-purpose sweeps below have returned. Assigning it here
+    // let a cal-verify (50 Ω load) sweep be saved under the antenna's label
+    // while the plot still showed the antenna.
 
     // The calibration guide's verification sweep: measure the fitted 50 ohm
     // load and judge the cal against what it MUST read.
@@ -1582,6 +1593,9 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
         return;
     }
 
+    m_live = result;
+    m_live.antennaNote = m_antNote->text().trimmed();
+
     // If this sweep was armed from the Feedline tab, file it as the open or
     // short half and re-analyse as soon as both are present.
     if (m_capturingOpen || m_capturingShort) {
@@ -1756,6 +1770,17 @@ void InstrumentPanel::onRecallClicked()
 void InstrumentPanel::onExportCsvClicked()
 {
     if (m_live.points.isEmpty()) { log("nothing to export."); return; }
+    // Guardrail 2 applies to an export as much as to a library save — the
+    // CSV is the copy that leaves the app.
+    if (m_antNote->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, "Provenance required",
+            "Describe what was connected before exporting.\n\n"
+            "The note is written into the CSV header so the data never "
+            "travels without it.");
+        m_antNote->setFocus();
+        return;
+    }
+    m_live.antennaNote = m_antNote->text().trimmed();
     const QString path = QFileDialog::getSaveFileName(this, "Export sweep CSV",
         QString("sweep-%1.csv").arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")),
         "CSV (*.csv)");

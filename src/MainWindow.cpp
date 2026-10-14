@@ -515,6 +515,12 @@ void MainWindow::handleVfo(const QStringList& args)
 // the band, and emits tx_sensors:0,mic,fwd,peak,swr; while transmitting.
 // We pair the latest vfo freq with each tx_sensors SWR, keeping the
 // minimum SWR seen per frequency, until trx:0,false ends the sweep.
+//
+// ⚠ EVERY keydown looks like that — a QSO, a TX Cal point, a console key —
+// and each used to replace (and persist) the band's saved sweep with a
+// one-point "sweep". Only a keydown that actually stepped across several
+// frequencies is kept as a sweep.
+static constexpr int kMinSweepFrequencies = 5;
 
 void MainWindow::handleTrx(const QStringList& args)
 {
@@ -527,9 +533,11 @@ void MainWindow::handleTrx(const QStringList& args)
         m_sweepStartStamp =
             QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
     } else if (state == "false") {
-        const bool had = m_sweepActive && !m_sweepSwr.isEmpty();
+        const bool had = m_sweepActive
+                         && m_sweepSwr.size() >= kMinSweepFrequencies;
         m_sweepActive = false;
         if (had) finalizeSweep();
+        else m_sweepSwr.clear();   // an ordinary transmission, not a sweep
     }
     refreshSweepUi();
 }
