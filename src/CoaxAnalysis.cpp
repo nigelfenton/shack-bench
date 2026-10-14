@@ -179,8 +179,8 @@ CoaxResult analyseOpenShort(const SweepResult& openEnd,
         if (out.meanSpacingMhz > 0) {
             // Consecutive crossings are a QUARTER wavelength apart, so the
             // electrical length is c/(4*spacing).
-            out.electricalHalfWaveM = 299.792458 / (4.0 * out.meanSpacingMhz);
-            out.physicalLengthM = out.electricalHalfWaveM * cable.vf;
+            out.electricalLengthM = 299.792458 / (4.0 * out.meanSpacingMhz);
+            out.physicalLengthM = out.electricalLengthM * cable.vf;
             out.physicalLengthFt = out.physicalLengthM * 3.280839895;
         }
     }

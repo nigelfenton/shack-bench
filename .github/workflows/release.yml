@@ -84,6 +84,21 @@ jobs:
               Copy-Item build\vc_redist.x64.exe $stage\
           }
 
+          # ⚠ MSVC runtime, APP-LOCAL. windeployqt --compiler-runtime only
+          # drops vc_redist.x64.exe, which the installer excludes and nobody
+          # runs — so on a PC without the VC++ 2015-2022 runtime the exe
+          # failed to start (MSVCP140.dll missing). Copy the CRT DLLs next to
+          # the exe instead (Microsoft-supported app-local deployment; no
+          # admin needed, matches PrivilegesRequired=lowest), and fail the
+          # build rather than ship a package without them.
+          $crt = Get-ChildItem "$env:VCToolsRedistDir\x64\Microsoft.VC*.CRT" -Directory |
+                 Select-Object -First 1
+          if (-not $crt) { throw "MSVC CRT redist dir not found under $env:VCToolsRedistDir" }
+          Copy-Item "$($crt.FullName)\*.dll" $stage\
+          foreach ($dll in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') {
+              if (-not (Test-Path "$stage\$dll")) { throw "$dll missing from the package" }
+          }
+
           # Plugin directories windeployqt creates.  No sqldrivers here —
           # ShackBench doesn't link Qt6::Sql.
           $pluginDirs = @('platforms','styles','imageformats',

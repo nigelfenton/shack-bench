@@ -9,13 +9,14 @@
 // The measurements are:
 //   Z0    = sqrt(Zoc * Zsc)                      (textbook, needs BOTH ends)
 //   gamma*l = atanh(sqrt(Zsc / Zoc))             loss = 8.686 * Re(gamma*l)
-//   length: X crosses zero every half wavelength, so the mean spacing of the
-//           crossings gives the ELECTRICAL length; the physical length needs
-//           the velocity factor.
+//   length: on the SHORTED end, X crosses zero every QUARTER wavelength
+//           (alternating series/parallel resonance), so the mean crossing
+//           spacing gives the ELECTRICAL length as c/(4*spacing); the
+//           physical length needs the velocity factor.
 //
 // ⭐ The VF is the part that bit us on 2026-08-03. Electrical length is
 // measured; physical length is an ASSUMPTION layered on top. The same
-// 88.07 m electrical half-wave is 190.7 ft at RG-213's VF 0.66 and 245.6 ft
+// 88.07 m electrical length is 190.7 ft at RG-213's VF 0.66 and 245.6 ft
 // at LMR-400's 0.85 — and because loss-per-foot is judged against the
 // physical length, choosing the wrong cable made a healthy line look 25-40%
 // lossy. Never report a loss verdict without stating the assumed VF.
@@ -64,7 +65,7 @@ struct CoaxResult {
     QVector<double> crossingsMhz;
     double  meanSpacingMhz = 0;
     double  spacingSpreadPct = 0;      // (max-min)/mean, a regularity check
-    double  electricalHalfWaveM = 0;
+    double  electricalLengthM = 0;
     double  assumedVf = 0;
     double  physicalLengthM = 0;
     double  physicalLengthFt = 0;

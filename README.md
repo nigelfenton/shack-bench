@@ -45,7 +45,7 @@ Or build from source — see [Build](#build) below.
 - Parsed views in the side panel:
   - **Current VFO / mode** — updated as the radio is tuned
   - **Spot table** — every `spot:` event the server emits, with callsign,
-    frequency, mode, and source (DX cluster / parks / RBN / etc.)
+    frequency, mode, colour and the spot's description text
   - **SWR scan** — captures an antenna SWR sweep over TCI, buckets it
     per band, overlays bands, and exports CSV
 - Save the raw log to a file for offline analysis
@@ -308,7 +308,10 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-On Windows: `.\build.bat` does the configure + build in one shot.
+On Windows: `.\build.bat` does the configure + build in one shot. It finds
+Visual Studio with `vswhere`; set `QT_DIR` first if your Qt kit isn't at
+`C:\Qt\6.10.3\msvc2022_64` (or `VCVARS` to point at a specific
+`vcvars64.bat`).
 
 ### Tests
 
