@@ -434,7 +434,7 @@ void InstrumentPanel::buildTrapTab()
     auto* intro = new QLabel(
         "Series-through S21 on the NanoVNA: put the trap IN LINE between CH0 "
         "and CH1. A parallel LC blocks the path at resonance, so the notch "
-        "gives f0, loaded Q, and an estimate of L and C.");
+        "gives f0, the trap's Q, and an estimate of L and C.");
     intro->setWordWrap(true);
     intro->setStyleSheet("color:#9fb4cc;");
     v->addWidget(intro);
@@ -455,8 +455,8 @@ void InstrumentPanel::buildTrapTab()
     m_trapZ0 = new QDoubleSpinBox();
     m_trapZ0->setRange(1.0, 600.0); m_trapZ0->setDecimals(1);
     m_trapZ0->setSuffix(" Ω"); m_trapZ0->setValue(50.0);
-    m_trapZ0->setToolTip("The through impedance the trap is measured in. "
-                         "Affects the L and C estimate only, not f0.");
+    m_trapZ0->setToolTip("The port impedance either side of the trap. "
+                         "Affects the Rp, L and C estimate only, not f0.");
     ctl->addWidget(m_trapZ0);
 
     m_trapSweep = new QPushButton("Sweep trap");
@@ -487,8 +487,8 @@ void InstrumentPanel::buildTrapTab()
     m_trapReport->setPlainText(
         "Trap bench — series-through S21.\n\n"
         "  f0 = the notch minimum\n"
-        "  Q  = f0 / (3 dB bandwidth)   [LOADED Q, not unloaded]\n"
-        "  L,C from f0 and Q in the fixture impedance\n\n"
+        "  Q  = f0 / (3 dB bandwidth)   [the trap's own Q]\n"
+        "  Rp from the notch depth, L,C from f0, Rp and Q\n\n"
         "Press \"Calibration guide\" on the right for the THROUGH cal that\n"
         "makes depth and Q quantitative, or \"How this works\" for the method.");
     v->addWidget(m_trapReport);
@@ -1519,26 +1519,32 @@ void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
             out << "TRAP";
             out << "";
             out << QString("  resonance f0     %1 MHz").arg(tr.f0Mhz, 0, 'f', 4);
-            out << QString("  notch depth      %1 dB below a %2 dB passband")
-                       .arg(tr.depthDb, 0, 'f', 1).arg(tr.passbandDb, 0, 'f', 1);
-            if (tr.loadedQ > 0) {
+            out << QString("  notch depth      %1 dB below %2 dB (the THRU reference)")
+                       .arg(tr.depthDb, 0, 'f', 1).arg(tr.referenceDb, 0, 'f', 0);
+            if (tr.rpOhms > 0)
+                out << QString("  Rp at resonance  %1 kΩ")
+                           .arg(tr.rpOhms / 1e3, 0, 'f', 1);
+            if (tr.trapQ > 0) {
                 out << QString("  3 dB bandwidth   %1 MHz")
                            .arg(tr.bandwidthMhz, 0, 'f', 4);
-                out << QString("  LOADED Q         %1").arg(tr.loadedQ, 0, 'f', 0);
+                out << QString("  Q (trap)         %1%2")
+                           .arg(tr.trapQ, 0, 'f', 0)
+                           .arg(tr.undersampled ? "   ⚠ undersampled" : "");
             }
             if (tr.inductanceUh > 0)
-                out << QString("  estimated L, C   %1 uH, %2 pF")
+                out << QString("  estimated L, C   %1 uH, %2 pF%3")
                            .arg(tr.inductanceUh, 0, 'f', 2)
-                           .arg(tr.capacitancePf, 0, 'f', 1);
+                           .arg(tr.capacitancePf, 0, 'f', 1)
+                           .arg(tr.lcFromSkirt ? "   (from the skirt)" : "");
             out << "";
             out << QString("  through cal      %1")
                        .arg(thru ? "YES — depth and Q are quantitative"
                                  : "NO — see the caution below");
             out << "";
-            out << "  ⚠ Q here is LOADED Q: the 50 Ω source and load damp the";
-            out << "    resonance, so it reads lower than the trap's unloaded Q.";
-            out << "    It is the right number for antenna work, but it is NOT";
-            out << "    the figure a coil datasheet quotes.";
+            out << "  Q here is the TRAP's own Q: 3 dB above the notch floor is";
+            out << "    where the trap's impedance is down to Rp/√2, its own";
+            out << "    half-power points. The 50 Ω fixture barely moves that, so";
+            out << "    it is comparable with a coil's quoted (unloaded) Q.";
             m_trapStatus->setText(QString("f0 %1 MHz").arg(tr.f0Mhz, 0, 'f', 4));
         }
         if (!tr.caution.isEmpty()) {
