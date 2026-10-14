@@ -17,3 +17,6 @@ CMakeUserPresets.json
 Thumbs.db
 .DS_Store
 *.log
+
+# Claude Code local state (agent worktrees, per-session settings)
+.claude/
