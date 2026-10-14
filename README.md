@@ -16,8 +16,12 @@ bench test instruments:
 
 ## Status
 
-**v0.5.0** (2026-08-27) is the first release under the Shack-Bench name,
-with installers for Windows, Linux and macOS.  The TCI tools and TX Cal are
+**v0.5.1** (2026-10-14) is a fixes release: TX safety in the console and
+TX Cal (no path can leave the radio keyed), corrected trap and choke
+maths, instrument Stop that actually stops, scope/NanoVNA parsing fixes,
+and a Windows package that bundles the VC++ runtime.  v0.5.0 (2026-08-27)
+was the first release under the Shack-Bench name, with installers for
+Windows, Linux and macOS.  The TCI tools and TX Cal are
 mature and used on air.  The Instruments workspace is new in 0.5 and has
 been verified on the instruments listed below and nowhere else; other
 models of the same families may need driver work.
