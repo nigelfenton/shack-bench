@@ -145,7 +145,7 @@ or below a configurable target (default −10 dBFS), and recommends a
 single `tx_gain` value to apply.  The injected test tone is generated
 inside the panel as TCI TX-audio frames — no external harness required.
 
-![TX Cal panel — calibration curve and "how to apply" guidance](docs/tx-cal-curve.png)
+![TX Cal panel — a real calibration run on a Flex 6300 into a dummy load: forward power and ALC peak against tx_gain, with the recommended tx_gain = 34 and how to apply it](docs/tx-cal-curve.png)
 
 The result is shown as a curve (forward power and ALC peak vs `tx_gain`)
 alongside a step-by-step "how to apply" panel — including the exact TCI
