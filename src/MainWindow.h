@@ -17,6 +17,7 @@
 #include <QSet>
 #include <QString>
 
+class QCloseEvent;
 class QLineEdit;
 class QSpinBox;
 class QPushButton;
@@ -42,6 +43,10 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+protected:
+    // Unkey anything this app keyed before the socket is torn down.
+    void closeEvent(QCloseEvent* e) override;
 
 private slots:
     void onConnectClicked();

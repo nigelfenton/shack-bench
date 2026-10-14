@@ -89,6 +89,14 @@ CalibrationPanel::CalibrationPanel(TciClient* tci, QWidget* parent)
     connect(m_step,     &QTimer::timeout, this, &CalibrationPanel::onStep);
     connect(m_audio,    &QTimer::timeout, this, &CalibrationPanel::onAudioTick);
     connect(m_watchdog, &QTimer::timeout, this, &CalibrationPanel::onWatchdog);
+    // ⚠ Link lost mid-run: TciClient auto-reconnects, and without this the
+    // state machine carried on and re-keyed (trx:0,true) on the new socket
+    // with nobody having decided to resume. A lost link ends the run.
+    if (m_tci) {
+        connect(m_tci, &TciClient::connectionChanged, this, [this](bool up) {
+            if (!up && m_running && !m_dry) abort("TCI link lost mid-run");
+        });
+    }
 
     // One second of mono test tone, regenerated whenever the peak changes.
     m_tonePeak = kTonePeak;
@@ -516,11 +524,11 @@ void CalibrationPanel::onStopClicked()
         abort("manual STOP");
     } else {
         // Emergency unkey even outside a run.
-        if (m_tci) {
-            m_tci->send("trx:0,false;");
-            m_tci->send("tune:0,false;");
-        }
-        log("manual unkey — sent trx:0,false; tune:0,false;", "#ff5050");
+        if (m_tci && m_tci->sendUnkey({0}))
+            log("manual unkey — sent trx:0,false; tune:0,false;", "#ff5050");
+        else
+            log("manual unkey — link DOWN, NOT sent; queued for reconnect",
+                "#ff5050");
     }
 }
 
@@ -808,17 +816,29 @@ void CalibrationPanel::abort(const QString& reason)
 {
     m_step->stop();
     m_watchdog->stop();
-    unkey();
-    log(QString("ABORT (%1) — sent trx:0,false; tune:0,false;").arg(reason),
-        "#ff5050");
+    if (unkey()) {
+        log(QString("ABORT (%1) — sent trx:0,false; tune:0,false;").arg(reason),
+            "#ff5050");
+    } else {
+        // ⚠ Never claim "sent" into a dead socket. TciClient holds the unkey
+        // and sends it first when the link comes back.
+        log(QString("ABORT (%1) — link DOWN, unkey NOT sent; queued for "
+                    "reconnect. Check the radio!").arg(reason),
+            "#ff5050");
+    }
     m_phase = Phase::Idle;
     setRunning(false);
     m_progress->setText(QString("aborted — %1").arg(reason));
     // Restore the slice mode if we forced DIGU for the (now aborted) run.
     if (!m_savedMode.isEmpty() && m_tci) {
-        m_tci->send(QString("modulation:0,%1;").arg(m_savedMode));
-        log(QString("restored slice 0 mode: DIGU → %1 (after abort)")
-                .arg(m_savedMode.toUpper()), "#6b8099");
+        if (m_tci->send(QString("modulation:0,%1;").arg(m_savedMode))) {
+            log(QString("restored slice 0 mode: DIGU → %1 (after abort)")
+                    .arg(m_savedMode.toUpper()), "#6b8099");
+        } else {
+            log(QString("could NOT restore slice 0 mode (link down) — set it "
+                        "back to %1 by hand").arg(m_savedMode.toUpper()),
+                "#ffaa00");
+        }
         m_savedMode.clear();
     }
 
@@ -829,14 +849,17 @@ void CalibrationPanel::abort(const QString& reason)
     }
 }
 
-void CalibrationPanel::unkey()
+bool CalibrationPanel::unkey()
 {
     m_streaming = false;
     m_watchdog->stop();
-    if (m_tci && !m_dry) {
-        m_tci->send("trx:0,false;");
-        m_tci->send("tune:0,false;");
-    }
+    if (m_tci && !m_dry) return m_tci->sendUnkey({0});
+    return true;
+}
+
+void CalibrationPanel::releaseTx(const QString& reason)
+{
+    if (m_running) abort(reason);
 }
 
 void CalibrationPanel::onWatchdog()

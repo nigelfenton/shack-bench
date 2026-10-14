@@ -5,6 +5,8 @@
 #include <QTimer>
 #include <QStringList>
 
+#include <algorithm>
+
 namespace TciMon {
 
 namespace {
@@ -61,6 +63,10 @@ void TciClient::connectToServer(const QString& host, quint16 port)
     if (m_socket->state() != QAbstractSocket::UnconnectedState) {
         m_socket->abort();
     }
+    // ⚠ After the abort: aborting a live socket emits disconnected(), which
+    // schedules a reconnect. Left pending, that timer fires once the NEW
+    // socket is up and aborts it — and round it goes.
+    cancelReconnect();
     m_socket->open(m_url);
 }
 
@@ -74,11 +80,33 @@ void TciClient::disconnectFromServer()
     setConnected(false);
 }
 
-void TciClient::send(const QString& cmd)
+bool TciClient::send(const QString& cmd)
 {
     if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
         m_socket->sendTextMessage(cmd);
+        return true;
     }
+    return false;
+}
+
+bool TciClient::sendUnkey(const QSet<int>& receivers)
+{
+    QList<int> rxs(receivers.begin(), receivers.end());
+    std::sort(rxs.begin(), rxs.end());
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        m_pendingUnkey.unite(receivers);
+        return false;
+    }
+    for (int rx : rxs) {
+        m_socket->sendTextMessage(QString("trx:%1,false;").arg(rx));
+        m_socket->sendTextMessage(QString("tune:%1,false;").arg(rx));
+    }
+    return true;
+}
+
+void TciClient::flush()
+{
+    if (m_socket) m_socket->flush();
 }
 
 void TciClient::sendBinary(const QByteArray& frame)
@@ -90,7 +118,15 @@ void TciClient::sendBinary(const QByteArray& frame)
 
 void TciClient::onConnected()
 {
+    cancelReconnect();   // a stale backoff timer would abort this socket
     m_reconnectAttempts = 0;
+    // An unkey that couldn't be sent while the link was down goes out first,
+    // before anything else can happen on this connection.
+    if (!m_pendingUnkey.isEmpty()) {
+        const QSet<int> pending = m_pendingUnkey;
+        m_pendingUnkey.clear();
+        sendUnkey(pending);
+    }
     setConnected(true);
     // Send `start;` to request streaming events.  Servers ignore unknown
     // commands so this is safe across TCI dialects.
