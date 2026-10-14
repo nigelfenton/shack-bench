@@ -134,14 +134,24 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
 
 InstrumentPanel::~InstrumentPanel()
 {
-    if (m_thread) {
-        m_thread->quit();
-        m_thread->wait(3000);
-    }
-    if (m_scopeThread) {
-        m_scopeThread->quit();
-        m_scopeThread->wait(3000);
-    }
+    // ⚠ Closing mid-sweep used to quit() + wait(3 s) while the worker sat in
+    // a blocking read of up to 3 minutes: the QThread child was then destroyed
+    // still running — a qFatal in Qt 6 — and the AA-170 never got its OFF.
+    // Cancel first so the read stops within ~120 ms and the driver sends OFF,
+    // then allow time for that OFF exchange (≤ 2 s) to finish.
+    if (m_worker) m_worker->cancel();
+    const auto stop = [](QThread* t, int ms) {
+        if (!t) return;
+        t->quit();
+        if (!t->wait(ms)) {
+            // Still blocked (a scope capture has no cancel hook yet). Orphan
+            // it rather than let ~QObject destroy a running thread and abort
+            // the whole app; the process is exiting anyway.
+            t->setParent(nullptr);
+        }
+    };
+    stop(m_thread, 8000);
+    stop(m_scopeThread, 3000);
 }
 
 void InstrumentPanel::buildAntennaTab()
@@ -1309,7 +1319,10 @@ void InstrumentPanel::onSweepClicked()
 void InstrumentPanel::onStopClicked()
 {
     if (m_worker) m_worker->cancel();
-    log("cancel requested — the instrument is left with RF off.");
+    // Don't claim RF is off yet — the sweep's finish report says so once the
+    // driver has actually sent OFF.
+    log("cancel requested — stopping the read; the result will confirm "
+        "when the instrument is off.");
 }
 
 void InstrumentPanel::setBusy(bool busy)
