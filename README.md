@@ -94,13 +94,19 @@ Shack-Bench that can key your radio (the other is TX Cal), so it is deliberately
 - **Dry-run by default.**  The arm state is *not* remembered — it resets
   to OFF every launch.  Unarmed, a command is only logged as
   "would send", never transmitted.
-- **TX-class confirm.**  `trx` / `tune` require a second explicit
-  confirmation even when armed.
-- **Watchdog.**  Keying a carrier starts a watchdog that auto-sends
-  `trx:0,false; tune:0,false;` if SWR exceeds the configured limit or
-  TX persists past the timeout.
-- **UNKEY NOW.**  Always available while armed; sends the same
-  unkey pair on demand.
+- **TX-class confirm.**  `trx`, `tune`, `cw_msg` and `cw_macros` require a
+  second explicit confirmation even when armed, and **every** command on
+  a line is checked, so `vfo:…;trx:0,true;` can't slip a key through.
+- **Watchdog.**  Keying a carrier starts a watchdog that unkeys every
+  receiver the console keyed if SWR exceeds the configured limit or TX
+  persists past the timeout.
+- **UNKEY NOW.**  Always available, armed or not; unkeying is always safe.
+- **Never left keyed.**  Disarming, Disconnect, a lost link or closing the
+  app all unkey first.  If the link is down the unkey is queued and sent
+  before anything else on reconnect, and the transcript says so rather
+  than claiming it was sent.
+
+![Console — dry-run banner, arm, SWR and TX-timeout limits, and the always-live UNKEY NOW](docs/console.png)
 
 Command-name autocomplete is driven by the built-in reference table.
 Replies arriving shortly after a send are echoed into the transcript so
@@ -232,7 +238,7 @@ confident numbers from a bad pair.
 
 Characterises a coil trap as a component before it goes on an antenna.  The
 trap sits **in series** between CH0 and CH1 of the NanoVNA; the S21 notch
-gives **f0**, notch depth, **loaded Q**, and estimates of L and C.  It
+gives **f0**, notch depth, the **trap's own Q**, Rp, and L and C.  It
 refuses to report f0 when the minimum is at the sweep edge, calls a notch
 under 3 dB "no usable notch", and omits Q when the 3 dB points fall outside
 the sweep.
@@ -245,6 +251,8 @@ Side panel guides:
 - **How this works**: f0, depth and Q, why the trap goes in series, and
   sweeping wide then narrow.
 
+![Instruments → Trap — sweep controls and the step-by-step guide explaining f0, depth and Q](docs/instruments-trap.png)
+
 #### Cable
 
 Two bench tests, each with its own guide:
@@ -255,9 +263,12 @@ Two bench tests, each with its own guide:
   says how long an offcut is needed: a short jumper resonates too high to
   measure in 3–30 MHz.
 - **Common-mode choke**: the G3TXQ two-SO-239 fixture (diagram in the
-  guide).  Common-mode impedance `Zcm = 2·Z0·(1/S21 − 1)`, reported **per
-  band** against a 1 kΩ threshold, after measuring the empty fixture's
-  floor and ceiling.
+  guide).  Common-mode impedance `Zcm = 2·Z0·(1/S21 − 1)` from the
+  **complex** S21 (a choke is mostly reactive, and |S21| alone under-reads
+  it), reported **per band** against a 1 kΩ threshold, after measuring the
+  empty fixture's floor and ceiling.
+
+![Instruments → Cable — velocity-factor and choke controls with the velocity-factor guide](docs/instruments-cable.png)
 
 #### Spectrum
 
