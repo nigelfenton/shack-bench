@@ -560,14 +560,14 @@ void GuidePanel::setGuide(const Guide& g)
 {
     m_guide = g;
     m_index = 0;
-    m_actionDone = false;
+    m_actionDone = m_verifyPending = false;
     render();
 }
 
 void GuidePanel::reset()
 {
     m_index = 0;
-    m_actionDone = false;
+    m_actionDone = m_verifyPending = false;
     render();
 }
 
@@ -575,7 +575,7 @@ void GuidePanel::onNext()
 {
     if (m_index + 1 < m_guide.steps.size()) {
         ++m_index;
-        m_actionDone = false;
+        m_actionDone = m_verifyPending = false;
         m_status->clear();
         render();
     }
@@ -585,7 +585,7 @@ void GuidePanel::onBack()
 {
     if (m_index > 0) {
         --m_index;
-        m_actionDone = false;
+        m_actionDone = m_verifyPending = false;
         m_status->clear();
         render();
     }
@@ -601,8 +601,30 @@ void GuidePanel::onAction()
     emit runCommand(s.command, s.title);
 }
 
-void GuidePanel::commandFinished(bool ok, const QString& reply)
+void GuidePanel::commandFinished(bool ok, QString reply)
 {
+    // ⚠ Steps declare a `verify` command and the reply it must `expect`, but
+    // nothing ever ran it: the action's own reply was taken as success
+    // whatever the instrument said, so every step "passed" and unlocked
+    // Next. Now an OK action is followed by its verify command, and only a
+    // reply containing `expect` completes the step.
+    const GuideStep* s = (m_index < m_guide.steps.size())
+                             ? &m_guide.steps[m_index] : nullptr;
+    if (m_verifyPending) {
+        m_verifyPending = false;
+        if (ok && s && !reply.contains(s->expect, Qt::CaseInsensitive)) {
+            ok = false;
+            reply = QString("check failed: '%1' replied '%2' — expected it to "
+                            "contain '%3'. Redo the step.")
+                        .arg(s->verify, reply, s->expect);
+        }
+    } else if (ok && s && !s->verify.isEmpty() && !s->expect.isEmpty()) {
+        m_verifyPending = true;
+        m_status->setText("checking…");
+        emit runCommand(s->verify, s->title);
+        return;
+    }
+
     m_lastReply = reply;
     m_action->setEnabled(true);
     m_actionDone = ok;
