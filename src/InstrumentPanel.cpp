@@ -24,6 +24,7 @@
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTextStream>
+#include <QSettings>
 #include <QThread>
 #include <QVBoxLayout>
 #include <cmath>
@@ -117,6 +118,9 @@ InstrumentPanel::InstrumentPanel(TciClient* tci, QWidget* parent)
     m_log->setMaximumHeight(110);
     m_log->setStyleSheet("background:#050a14; color:#9fb4cc; font-family:Consolas;");
     root->addWidget(m_log);
+
+    m_startButtons = { m_takeOpen, m_takeShort, m_trapSweep,
+                       m_vfMeasure, m_chokeMeasure };
 
     m_thread = new QThread(this);
     m_worker = new SweepWorker();
@@ -309,6 +313,7 @@ void InstrumentPanel::buildFeedlineTab()
     connect(m_takeShort, &QPushButton::clicked, this,
             &InstrumentPanel::onTakeShortClicked);
     cap->addWidget(m_takeShort);
+    cap->addWidget(makeStopButton());
     m_shortState = new QLabel("— not captured —");
     m_shortState->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
     cap->addWidget(m_shortState, 1);
@@ -475,6 +480,7 @@ void InstrumentPanel::buildTrapTab()
     connect(m_trapSweep, &QPushButton::clicked, this,
             &InstrumentPanel::onTrapSweep);
     ctl->addWidget(m_trapSweep);
+    ctl->addWidget(makeStopButton());
     m_trapStatus = new QLabel("idle");
     m_trapStatus->setStyleSheet("color:#9fb4cc; font-family:Consolas;");
     ctl->addWidget(m_trapStatus, 1);
@@ -614,6 +620,7 @@ void InstrumentPanel::buildCableTab()
     connect(m_vfMeasure, &QPushButton::clicked, this,
             &InstrumentPanel::onMeasureVf);
     vfl->addWidget(m_vfMeasure);
+    vfl->addWidget(makeStopButton());
     vfl->addStretch();
     v->addWidget(vfBox);
 
@@ -635,6 +642,7 @@ void InstrumentPanel::buildCableTab()
     connect(m_chokeMeasure, &QPushButton::clicked, this,
             &InstrumentPanel::onMeasureChoke);
     chl->addWidget(m_chokeMeasure);
+    chl->addWidget(makeStopButton());
     chl->addStretch();
     v->addWidget(chBox);
 
@@ -811,12 +819,22 @@ void InstrumentPanel::onGuideCommand(const QString& command,
     }
 
     log(QString("guide: %1 → %2").arg(stepTitle, command));
+    m_pendingGuideCmd = command.trimmed();
+    {   // Remember the span a guide sets — it becomes the cal span at `cal done`.
+        const QStringList p = m_pendingGuideCmd.split(' ', Qt::SkipEmptyParts);
+        if (p.size() >= 3 && p[0] == "sweep") {
+            bool okA = false, okB = false;
+            const qint64 a = p[1].toLongLong(&okA), b = p[2].toLongLong(&okB);
+            if (okA && okB && b > a) { m_guideSpanFromHz = a; m_guideSpanToHz = b; }
+        }
+    }
     QMetaObject::invokeMethod(m_worker, "runRawCommand", Qt::QueuedConnection,
                               Q_ARG(QString, port), Q_ARG(QString, command));
 }
 
 void InstrumentPanel::onRawCommandDone(bool ok, const QString& reply)
 {
+    onGuideCommandDone(ok);
     if (m_activeGuide) m_activeGuide->commandFinished(ok, reply);
     log(QString("guide: %1%2").arg(ok ? "ok" : "FAILED",
                                    reply.isEmpty() ? QString()
@@ -1339,6 +1357,52 @@ void InstrumentPanel::setBusy(bool busy)
     m_antSweep->setEnabled(!busy);
     m_saSweep->setEnabled(!busy);
     m_antStop->setEnabled(busy);
+    // ⚠ Only the Antenna tab used to have a Stop: a sweep started from Trap,
+    // Cable or Feedline could only be stopped by switching to Antenna (#25).
+    for (QPushButton* b : m_stopButtons)  b->setEnabled(busy);
+    for (QPushButton* b : m_startButtons) b->setEnabled(!busy);
+}
+
+void InstrumentPanel::onGuideCommandDone(bool ok)
+{
+    const QString cmd = m_pendingGuideCmd;
+    m_pendingGuideCmd.clear();
+    if (!ok) return;
+    QSettings s;
+    if (cmd == "cal reset") {
+        // A new calibration has begun: the old span no longer describes it.
+        s.remove("instruments/nanovnaCal");
+    } else if (cmd == "cal done" && m_guideSpanFromHz > 0) {
+        s.setValue("instruments/nanovnaCal/fromHz", m_guideSpanFromHz);
+        s.setValue("instruments/nanovnaCal/toHz",   m_guideSpanToHz);
+        s.setValue("instruments/nanovnaCal/at",
+                   QDateTime::currentDateTime().toString(Qt::ISODate));
+        log(QString("calibration span recorded: %1–%2 MHz")
+                .arg(m_guideSpanFromHz / 1e6, 0, 'f', 3)
+                .arg(m_guideSpanToHz / 1e6, 0, 'f', 3));
+    }
+}
+
+void InstrumentPanel::applyKnownCalSpan(SweepResult& r) const
+{
+    // Only for the NanoVNA, and only while it reports a calibration exists.
+    if (!r.instrument.contains("NanoVNA") ||
+        !r.calState.contains("cal'ed", Qt::CaseInsensitive))
+        return;
+    QSettings s;
+    const qint64 from = s.value("instruments/nanovnaCal/fromHz", 0).toLongLong();
+    const qint64 to   = s.value("instruments/nanovnaCal/toHz", 0).toLongLong();
+    if (from > 0 && to > from) { r.calFromHz = from; r.calToHz = to; }
+}
+
+QPushButton* InstrumentPanel::makeStopButton()
+{
+    auto* b = new QPushButton("Stop");
+    b->setEnabled(false);
+    b->setToolTip("Stop the running sweep. The instrument is left with RF off.");
+    connect(b, &QPushButton::clicked, this, &InstrumentPanel::onStopClicked);
+    m_stopButtons << b;
+    return b;
 }
 
 void InstrumentPanel::onSweepProgress(int done, int total, const QString& note)
@@ -1361,8 +1425,11 @@ QString InstrumentPanel::provenanceLine(const SweepResult& r) const
                                    : QString("  · %1").arg(r.antennaNote));
 }
 
-void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& result)
+void InstrumentPanel::onSweepFinished(const TciMon::SweepResult& sweep)
 {
+    SweepResult result = sweep;
+    applyKnownCalSpan(result);      // the recorded cal span, or 0 = unknown
+
     setBusy(false);
 
     // A Stop, or a failure, must disarm EVERY special-purpose capture.

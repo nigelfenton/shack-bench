@@ -331,17 +331,13 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     const QStringList v = command(sp, "version", 2000, 400);
     if (!v.isEmpty()) res.firmware = v.first();
 
-    // Record the calibration span BEFORE changing the sweep -- the stored cal
-    // belongs to whatever range was set when it was taken, and re-ranging is
-    // exactly how a cal silently starts interpolating.
-    const QStringList before = command(sp, "sweep", 2000, 400);
-    if (!before.isEmpty()) {
-        const QStringList p = before.first().split(' ', Qt::SkipEmptyParts);
-        if (p.size() >= 2) {
-            res.calFromHz = p[0].toLongLong();
-            res.calToHz   = p[1].toLongLong();
-        }
-    }
+    // ⚠ The calibrated span is NOT read here. This used to record the reply to
+    // `sweep` before re-ranging as "the cal span" — true only for the first
+    // sweep after a calibration; every later sweep reported the PREVIOUS
+    // sweep's span instead (#23: badge said 7.000–7.300 MHz on a 3–30 MHz
+    // cal). The firmware does not expose the cal span, so the panel supplies
+    // the one recorded when its calibration guide applied the cal, or leaves
+    // calFromHz/calToHz at 0, which reads honestly as "unknown".
     const QStringList cal = command(sp, "cal", 2000, 400);
     res.calState = cal.isEmpty() ? QString("unknown") : cal.first();
 

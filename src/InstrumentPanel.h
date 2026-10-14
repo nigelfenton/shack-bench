@@ -115,6 +115,19 @@ private:
     QLineEdit*      m_antNote = nullptr;
     QPushButton*    m_antSweep = nullptr;
     QPushButton*    m_antStop  = nullptr;
+    // Every tab that starts a sweep gets its own Stop (#25); setBusy() drives
+    // all of them, and the start buttons, from the one busy flag.
+    QVector<QPushButton*> m_stopButtons;
+    QVector<QPushButton*> m_startButtons;
+    QPushButton* makeStopButton();
+
+    // The NanoVNA's calibrated span, as recorded when the calibration guide
+    // applied the cal (#23). Persisted; cleared by `cal reset`.
+    void applyKnownCalSpan(TciMon::SweepResult& r) const;
+    void onGuideCommandDone(bool ok);
+    QString m_pendingGuideCmd;          // the raw command in flight
+    qint64  m_guideSpanFromHz = 0;      // last span a guide set with `sweep`
+    qint64  m_guideSpanToHz   = 0;
     QLabel*         m_antStatus = nullptr;
     QLabel*         m_antCalBadge = nullptr;
     TracePlot*      m_plotSwr = nullptr;
