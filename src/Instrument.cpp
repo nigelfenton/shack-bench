@@ -7,6 +7,7 @@
 #include <QSerialPortInfo>
 #include <QStringList>
 #include <QThread>
+#include <atomic>
 #include <cmath>
 #include <limits>
 
@@ -20,13 +21,19 @@ namespace {
 // middle, so a naive "wait 1 s then read" returns an empty buffer and looks
 // exactly like "the instrument sent nothing". Both the NanoVNA's `data 0` and
 // the AA-170's FRX stream were observed doing this during bring-up.
-QString readUntilQuiet(QSerialPort& sp, int capMs, int quietMs)
+//
+// `cancel`, when given, is polled every wait (≤120 ms). ⚠ Without it Stop was
+// only noticed after the read returned — up to 3 minutes into an AA-170 FRX
+// stream — while the log already claimed the instrument was off.
+QString readUntilQuiet(QSerialPort& sp, int capMs, int quietMs,
+                       const std::atomic<bool>* cancel = nullptr)
 {
     QByteArray out;
     QElapsedTimer total, since;
     total.start();
     since.start();
     while (total.elapsed() < capMs) {
+        if (cancel && cancel->load()) break;
         if (sp.waitForReadyRead(120)) {
             out += sp.readAll();
             since.restart();
@@ -59,13 +66,17 @@ QStringList cleanLines(const QString& blob, const QString& echoed)
 // The NanoVNA and tinySA shells accept CR alone as well, so one terminator
 // serves all three.
 QStringList command(QSerialPort& sp, const QString& cmd,
-                    int capMs = 4000, int quietMs = 600)
+                    int capMs = 4000, int quietMs = 600,
+                    const std::atomic<bool>* cancel = nullptr)
 {
     sp.clear();
     sp.write((cmd + "\r").toLatin1());
     sp.flush();
-    return cleanLines(readUntilQuiet(sp, capMs, quietMs), cmd);
+    return cleanLines(readUntilQuiet(sp, capMs, quietMs, cancel), cmd);
 }
+
+constexpr const char* kCancelled = "cancelled by the operator — partial data "
+                                   "discarded";
 
 bool openPort(QSerialPort& sp, const QString& port, int baud, QString* err)
 {
@@ -232,7 +243,7 @@ void SweepWorker::runRigExpertSweep(const QString& port, qint64 fromHz,
     sp.clear();
     sp.write(QString("FRX%1\r").arg(points).toLatin1());   // CR only — see command()
     sp.flush();
-    const QString blob = readUntilQuiet(sp, 180000, 5000);
+    const QString blob = readUntilQuiet(sp, 180000, 5000, &m_cancel);
 
     int parsed = 0;
     for (const QString& line : cleanLines(blob, QString())) {
@@ -260,10 +271,14 @@ void SweepWorker::runRigExpertSweep(const QString& port, qint64 fromHz,
         if (++parsed % 5 == 0) emit progress(parsed, points, "sweeping");
     }
 
-    command(sp, "OFF", 2000, 400);   // leave RF off, always
+    // Leave RF off, always — including after a cancel. Deliberately NOT
+    // cancellable: this is the command a Stop exists to get to.
+    command(sp, "OFF", 2000, 400);
     sp.close();
 
-    if (res.points.isEmpty()) {
+    if (m_cancel) {
+        res.error = QString(kCancelled) + "; OFF sent, RF is off";
+    } else if (res.points.isEmpty()) {
         res.error = "the analyser accepted the commands but returned no "
                     "measurement data (FRX answered OK with no MHz,R,X lines). "
                     "Check the batteries and that the unit's own screen is live "
@@ -314,9 +329,9 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     QThread::msleep(600);
 
     emit progress(0, points, "reading frequencies");
-    const QStringList freqs = command(sp, "frequencies", 30000, 2500);
+    const QStringList freqs = command(sp, "frequencies", 30000, 2500, &m_cancel);
     emit progress(points / 3, points, "reading S11");
-    const QStringList data = command(sp, "data 0", 30000, 2500);
+    const QStringList data = command(sp, "data 0", 30000, 2500, &m_cancel);
 
     const int n = std::min(freqs.size(), data.size());
     int impossible = 0;
@@ -346,7 +361,9 @@ void SweepWorker::runNanoVnaSweep(const QString& port, qint64 fromHz,
     }
     sp.close();
 
-    if (res.points.isEmpty()) {
+    if (m_cancel) {
+        res.error = kCancelled;
+    } else if (res.points.isEmpty()) {
         res.error = "no S11 data returned";
     } else {
         res.ok = true;
@@ -414,9 +431,9 @@ void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
     QThread::msleep(600);
 
     emit progress(0, points, "reading frequencies");
-    const QStringList freqs = command(sp, "frequencies", 30000, 2500);
+    const QStringList freqs = command(sp, "frequencies", 30000, 2500, &m_cancel);
     emit progress(points / 3, points, "reading S21");
-    const QStringList data = command(sp, "data 1", 30000, 2500);
+    const QStringList data = command(sp, "data 1", 30000, 2500, &m_cancel);
 
     // ⚠ These two lists can differ in length on this firmware — data 1 has
     // been observed returning 100 where frequencies returns 201. Pair against
@@ -448,7 +465,9 @@ void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
     }
     sp.close();
 
-    if (res.points.isEmpty()) {
+    if (m_cancel) {
+        res.error = kCancelled;
+    } else if (res.points.isEmpty()) {
         res.error = "no S21 data returned";
     } else {
         res.ok = true;
@@ -513,7 +532,7 @@ void SweepWorker::runTinySaSweep(const QString& port, qint64 fromHz,
 
     // `data 0` returns one ASCII dBm value per point. (`scanraw` returns a
     // BINARY blob -- do not parse it as text.)
-    const QStringList data = command(sp, "data 0", 40000, 2500);
+    const QStringList data = command(sp, "data 0", 40000, 2500, &m_cancel);
     const int n = data.size();
     for (int i = 0; i < n && !m_cancel; ++i) {
         bool ok = false;
@@ -526,7 +545,8 @@ void SweepWorker::runTinySaSweep(const QString& port, qint64 fromHz,
     }
     sp.close();
 
-    if (res.points.isEmpty()) res.error = "no spectrum data returned";
+    if (m_cancel) res.error = kCancelled;
+    else if (res.points.isEmpty()) res.error = "no spectrum data returned";
     else res.ok = true;
     emit finished(res);
 }

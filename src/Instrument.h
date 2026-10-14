@@ -22,6 +22,8 @@
 #include <QVector>
 #include <QMap>
 
+#include <atomic>
+
 namespace TciMon {
 
 // One measured point. Antenna analysers give R and X natively; SWR and return
@@ -105,7 +107,11 @@ public slots:
     // guided calibration so the operator never has to type SCPI.
     void runRawCommand(const QString& port, const QString& command);
 
-    void cancel() { m_cancel = true; }
+public:
+    // Called from the GUI thread while a slot runs on the worker thread —
+    // hence atomic, and NOT a slot: a queued call would wait behind the very
+    // sweep it is meant to stop. The long serial reads poll it.
+    void cancel() { m_cancel.store(true); }
 
 signals:
     void progress(int done, int total, const QString& note);
@@ -113,7 +119,7 @@ signals:
     void finished(const TciMon::SweepResult& result);
 
 private:
-    bool m_cancel = false;
+    std::atomic<bool> m_cancel{false};
 };
 
 } // namespace TciMon
