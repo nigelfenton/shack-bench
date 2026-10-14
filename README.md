@@ -253,7 +253,7 @@ Side panel guides:
 - **How this works**: f0, depth and Q, why the trap goes in series, and
   sweeping wide then narrow.
 
-![Instruments → Trap — sweep controls and the step-by-step guide explaining f0, depth and Q](docs/instruments-trap.png)
+![Instruments → Trap — a live S21 sweep through just the THRU cable: flat 0 dB, correctly refused as "no usable notch", with the calibration guide's final verify (CAL GOOD) on the right](docs/instruments-trap.png)
 
 #### Cable
 
