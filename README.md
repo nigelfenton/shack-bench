@@ -218,6 +218,8 @@ frequency axis with ham-band shading, markers and a hover readout (SWR
 keeps 1:1 at the bottom, so a dip reads as a dip).  Sweeps go to a
 **library** to recall and overlay, and export to CSV.
 
+![Instruments → Antenna — a NanoVNA-F sweep of a 50 Ω load across 40 m: SWR flat at 1.00, R = 50 Ω and X = 0 Ω, return loss ~60 dB, each plot stamped with its provenance](docs/instruments-antenna.png)
+
 #### Feedline
 
 Open/short analysis of a coax run from two NanoVNA sweeps:
