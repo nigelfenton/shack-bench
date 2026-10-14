@@ -217,7 +217,10 @@ jobs:
               --desktop-file AppDir/usr/share/applications/tcimonitor.desktop \
               --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/tcimonitor.png
 
-          version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
+          # Tags (v*) name the artifact; anything else (a branch run, whose
+          # name can contain "/") is dev-<sha>, matching the Windows job.
+          version="${GITHUB_REF_NAME}"
+          case "$version" in v*) ;; *) version="dev-${GITHUB_SHA:0:7}" ;; esac
           # linuxdeploy names the AppImage from the desktop file's Name= field,
           # which is "Shack-Bench". The glob here still said TCI*Monitor* — the
           # name this project had before it was renamed — so the mv found
@@ -281,7 +284,10 @@ jobs:
         run: |
           "$QT_ROOT_DIR/bin/macdeployqt" build/ShackBench.app
 
-          version="${GITHUB_REF_NAME:-dev-${GITHUB_SHA:0:7}}"
+          # Tags (v*) name the artifact; anything else (a branch run, whose
+          # name can contain "/") is dev-<sha>, matching the Windows job.
+          version="${GITHUB_REF_NAME}"
+          case "$version" in v*) ;; *) version="dev-${GITHUB_SHA:0:7}" ;; esac
           dmg_name="ShackBench-${version}-macos-arm64.dmg"
 
           mkdir -p dmg-stage
