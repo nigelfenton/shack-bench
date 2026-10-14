@@ -23,6 +23,8 @@
 #include <QString>
 #include <QVector>
 
+#include <complex>
+
 namespace TciMon {
 
 // ---- velocity factor ---------------------------------------------------
@@ -74,8 +76,22 @@ struct ChokeResult {
     QVector<BandZ> bands;
 };
 
-// S21 magnitude in dB -> common-mode impedance, judged against `thresholdOhms`
-// (1000 is the usual figure for HF).
+// One complex S21 sample from the fixture.
+struct S21Sample {
+    double mhz = 0;
+    std::complex<double> s21;
+};
+
+// Complex S21 -> common-mode impedance |Zcm|, judged against `thresholdOhms`
+// (1000 is the usual figure for HF). Uses the full complex formula.
+// ⚠ A choke is mostly REACTIVE away from self-resonance, and the magnitude-only
+// form 2*Z0*(1/|S21| - 1) is exact only for a resistive Z: a true 1050 Ω
+// reactance read as 955 Ω and FAILED a 1 kΩ threshold.
+ChokeResult analyseChoke(const QVector<S21Sample>& samples, double fixtureZ0,
+                         double thresholdOhms);
+
+// Magnitude-only fallback (phase unknown): treats S21 as real, so reactive
+// impedances UNDER-read. Prefer the complex overload; kept for old data.
 ChokeResult analyseChoke(const QVector<QPair<double, double>>& freqMhzAndS21Db,
                          double fixtureZ0, double thresholdOhms);
 

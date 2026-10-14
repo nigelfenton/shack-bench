@@ -444,6 +444,8 @@ void SweepWorker::runNanoVnaS21Sweep(const QString& port, qint64 fromHz,
         // Reuse the dbm field to carry |S21| in dB — the trap tab reads it and
         // no other consumer looks at dbm on a VNA sweep.
         pt.dbm = (mag > 0) ? 20.0 * std::log10(mag) : -120.0;
+        pt.s21Re = re;
+        pt.s21Im = im;
         res.points.push_back(pt);
     }
     sp.close();

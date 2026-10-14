@@ -34,6 +34,10 @@ struct SweepPoint {
     double swr = 1.0;     // derived, >= 1
     double returnLossDb = 0.0;
     double dbm = 0.0;     // spectrum instruments
+    // NanoVNA S21 sweeps: the complex S21 itself. The choke analysis needs
+    // the phase — |S21| alone under-reads a reactive impedance.
+    double s21Re = 0.0;
+    double s21Im = 0.0;
 };
 
 struct SweepResult {
