@@ -1,14 +1,26 @@
 # Shack-Bench
 
-A lightweight diagnostic tool for the **TCI** (Transceiver Control Interface)
-WebSocket protocol used by AetherSDR, ExpertSDR2, SunSDR, and similar SDR
-applications.
+A bench workstation for the radio shack.  It started as **TCI Monitor**, a
+diagnostic tool for the **TCI** (Transceiver Control Interface) WebSocket
+protocol used by AetherSDR, ExpertSDR2, SunSDR and similar SDR applications,
+and grew into a tabbed workbench that also calibrates TX drive and drives
+bench test instruments:
 
-Shack-Bench connects to a TCI server, lets you see every raw message the
-server sends, and pulls structured information out of common events (VFO,
-mode, spots).  Useful when you're debugging a TCI client, exploring what
-events a server emits in a given workflow, or just curious about the wire
-protocol.
+- **TCI tools:** watch, inspect, send, compare, record and replay the TCI
+  stream, plus antenna SWR sweeps captured over TCI.
+- **TX Cal:** closed-loop WSJT-X drive calibration against the radio's ALC.
+- **Instruments:** an antenna analyser / VNA, a spectrum analyser and an
+  oscilloscope, with dedicated bench tests for feedlines, coil traps,
+  cable velocity factor and common-mode chokes, each with a guided
+  walkthrough.
+
+## Status
+
+**v0.5.0** (2026-08-27) is the first release under the Shack-Bench name,
+with installers for Windows, Linux and macOS.  The TCI tools and TX Cal are
+mature and used on air.  The Instruments workspace is new in 0.5 and has
+been verified on the instruments listed below and nowhere else; other
+models of the same families may need driver work.
 
 ## Download
 
@@ -39,13 +51,21 @@ Or build from source — see [Build](#build) below.
 - Save the raw log to a file for offline analysis
 - Filter / search the message stream, suppress flooding command types
 - Auto-reconnect with backoff if the connection drops
+- **Discover…** finds TCI peripherals on the LAN by mDNS
+  (`_tci._tcp.local`, AetherSDR's discovery schema); double-click a row to
+  fill in host and port.  A service-type selector browses other DNS-SD
+  services too.
+- **Command reference** (F1): every TCI command with its syntax and a
+  description, including AetherSDR's `clicked_on_spot` /
+  `rx_clicked_on_spot` (AE #3145), which highlight the matching spot row
 - A **toolkit** of diagnostic tabs (see below) for deeper work
 
 ## Toolkit tabs
 
-As of v0.3 the window is a tabbed workbench.  The **Monitor** tab is the
-classic view above; the connect bar at the top is shared by the tabs
-that observe the live connection.
+The window is a tabbed workbench: **Monitor**, **Inspect**, **Console**,
+**Compare**, **Replay**, **TX Cal** and **Instruments**.  The **Monitor**
+tab is the classic view above; the connect bar at the top is shared by the
+tabs that observe the live connection.
 
 ### Inspect
 
@@ -64,8 +84,8 @@ table.
 
 ### Console
 
-A free-text TCI command sender.  This is the **only** part of TCI
-Monitor that can key your radio, so it is deliberately defensive:
+A free-text TCI command sender.  This is one of only two parts of
+Shack-Bench that can key your radio (the other is TX Cal), so it is deliberately defensive:
 
 - **Dry-run by default.**  The arm state is *not* remembered — it resets
   to OFF every launch.  Unarmed, a command is only logged as
@@ -151,6 +171,110 @@ Requires an AetherSDR carrying
 panel detects a missing `alc` field on the first keyed point and
 refuses the run with a clear diagnostic message.
 
+Sampling is defensive: a point that captured fewer than two samples, or
+only floor-level ALC with zero power, is re-keyed up to twice before it is
+recorded, and dead frames at the key edges are dropped.  If the ALC curve
+stays flat across the sweep, the panel reports that as an observation, not
+a diagnosis — a steady tone produces constant RF in SSB, so a flat curve
+can be entirely innocent.  The test-tone peak is adjustable (default 0.999).
+
+### Instruments
+
+A workspace for bench test equipment, with its own tabs.  **Probe
+instruments** finds what is plugged in (off the GUI thread, about 1.3 s for
+two instruments) and says which tab each one went to.  Instruments are
+identified by asking them, not by USB VID/PID: the NanoVNA and tinySA share
+VID_0483/PID_5740.
+
+**Verified instruments**
+
+| Instrument | Link | Used by |
+|---|---|---|
+| RigExpert AA-170 | USB serial (FTDI), 38400 baud | Antenna |
+| NanoVNA-F V2 | USB serial (STM32 CDC) | Antenna, Feedline, Trap, Cable |
+| tinySA (original, not Ultra) | USB serial (STM32 CDC) | Spectrum |
+| Hantek DSO2D15 | USBTMC via VISA | Scope |
+
+**Guardrails on every sweep:** a calibration-range badge, with out-of-cal
+regions hatched; a provenance note required before a sweep can be saved;
+a **TX interlock** that refuses to sweep while the radio reports transmit;
+a physical-impossibility flag (|Γ| ≥ 1 or SWR < 1 means a bad cal or an
+open port, never a bad antenna); and instruments left with RF off.
+
+#### Antenna
+
+SWR, R and X, and return loss from the AA-170 or NanoVNA, on a shared
+frequency axis with ham-band shading, markers and a hover readout (SWR
+keeps 1:1 at the bottom, so a dip reads as a dip).  Sweeps go to a
+**library** to recall and overlay, and export to CSV.
+
+#### Feedline
+
+Open/short analysis of a coax run from two NanoVNA sweeps:
+
+- characteristic impedance, `Z0 = √(Zoc·Zsc)`
+- matched loss, `8.686·Re(atanh√(Zsc/Zoc))`, judged against a cable
+  catalogue (RG-213/8X/58, LMR-400/DXE-400, LMR-600, hardline) with loss
+  interpolated on √f
+- electrical length from the reactance zero-crossings of the shorted sweep
+  (they fall every **quarter** wavelength), and physical length for a
+  stated **velocity factor**, which is an explicit, editable input
+
+It checks that the two sweeps actually invert (a quarter-wave open looks
+like a short) and refuses a pair that doesn't, rather than producing
+confident numbers from a bad pair.
+
+#### Trap
+
+Characterises a coil trap as a component before it goes on an antenna.  The
+trap sits **in series** between CH0 and CH1 of the NanoVNA; the S21 notch
+gives **f0**, notch depth, **loaded Q**, and estimates of L and C.  It
+refuses to report f0 when the minimum is at the sweep edge, calls a notch
+under 3 dB "no usable notch", and omits Q when the 3 dB points fall outside
+the sweep.
+
+Side panel guides:
+
+- **Calibration guide**: an 8-step full 2-port NanoVNA calibration that
+  runs each step for you, sets the span first, waits for each standard to
+  settle, and ends by **verifying** the cal on the still-fitted load.
+- **How this works**: f0, depth and Q, why the trap goes in series, and
+  sweeping wide then narrow.
+
+#### Cable
+
+Two bench tests, each with its own guide:
+
+- **Velocity factor**: measured from a known length with the far end
+  shorted, instead of assumed.  Sweeps a user-set span (default the
+  calibrated 3–30 MHz).  It refuses a sweep that is mostly dead data and
+  says how long an offcut is needed: a short jumper resonates too high to
+  measure in 3–30 MHz.
+- **Common-mode choke**: the G3TXQ two-SO-239 fixture (diagram in the
+  guide).  Common-mode impedance `Zcm = 2·Z0·(1/S21 − 1)`, reported **per
+  band** against a 1 kΩ threshold, after measuring the empty fixture's
+  floor and ceiling.
+
+#### Spectrum
+
+Amplitude vs frequency from the tinySA.  The driver reads the sweep range
+**back** rather than trusting the request: the original tinySA silently
+clamps an over-range request (ask for 6 GHz, get 0.1–350 MHz), and the
+panel says so.
+
+#### Scope
+
+Waveform capture from the Hantek DSO2D15, with Export CSV (with a full
+provenance header) and Save PNG.  Vpp, Vrms, mean and frequency are
+**computed** from the samples, and labelled as such: firmware 3.0.1
+reports no measurement values.  Frequency is only reported for a swing of
+at least half a division.  Verified against the scope's own calibrator
+(1 kHz, 4.88–4.96 Vpp).
+
+The scope needs a **VISA runtime** (NI-VISA, Keysight IO Libraries or
+similar), loaded at run time.  Without one, the Scope tab says so and every
+other tab works normally.
+
 ## Capture file format
 
 A `.tcicap` file is plain UTF-8 text:
@@ -175,8 +299,9 @@ stripped, and lines play with a fixed default gap.
 
 ## Build
 
-Requires Qt 6.2+ with the WebSockets module, CMake 3.20+, and a C++17
-compiler.
+Requires Qt 6.2+ with the WebSockets, SerialPort, Network and Svg modules,
+CMake 3.20+, and a C++17 compiler.  A VISA runtime is optional (Scope tab
+only) and is not needed to build.
 
 ```sh
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -184,6 +309,18 @@ cmake --build build
 ```
 
 On Windows: `.\build.bat` does the configure + build in one shot.
+
+### Tests
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Four offline suites check the analysis maths against synthetic data with
+known answers, plus regressions from real bench measurements:
+`coax_analysis_test`, `trap_analysis_test`, `cable_tests_test` and
+`scope_decode_test`.  `instrument_probe_test` talks to real hardware and is
+built but not run by `ctest`.
 
 ## Why standalone?
 
