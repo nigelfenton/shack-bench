@@ -257,15 +257,20 @@ jobs:
 
   # ── macOS (Apple Silicon) ───────────────────────────────────────────────
   build-macos:
-    # macos-14, NOT macos-latest. Apple removed the AGL framework in macOS 26
+    # A pinned runner, NOT macos-latest. Apple removed the AGL framework in macOS 26
     # (Tahoe), and Qt 6.8.0's FindWrapOpenGL.cmake still links it, so the job
     # failed with "framework 'AGL' not found" the moment macos-latest drifted
     # onto that SDK. Nothing in this project references AGL.
     #
     # Pinned rather than chasing a newer Qt: ShackBook builds all four
-    # artifacts on macos-14 with this exact Qt version, so this is a
-    # configuration proven to work rather than a guess.
-    runs-on: macos-14
+    # artifacts with this exact Qt version, so this is a configuration
+    # proven to work rather than a guess.
+    #
+    # macos-15, not macos-14: GitHub retired macos-14 in November 2026 (jobs
+    # were cancelled with "The configuration 'macos-14-arm64-us-default' is
+    # not supported"). macos-15 is still before Tahoe, so the SDK still has
+    # AGL. When macos-15 goes too, the fix is a Qt new enough not to link AGL.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
