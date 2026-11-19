@@ -1,0 +1,4 @@
+// Windows resource: the application icon, embedded in ShackBench.exe so Explorer,
+// the taskbar and Alt-Tab show it. IDI_ICON1 is also what Qt uses for the window
+// icon on Windows. The G0JKN "signal ring" ShackBench mark (a meter needle).
+IDI_ICON1 ICON "shackbench.ico"

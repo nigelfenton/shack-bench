@@ -126,7 +126,12 @@ set(TCIMON_SOURCES
 )
 
 if(WIN32)
-    add_executable(ShackBench WIN32 ${TCIMON_SOURCES})
+    # resources/shackbench.rc embeds the app icon (resources/shackbench.ico).
+    add_executable(ShackBench WIN32 ${TCIMON_SOURCES} resources/shackbench.rc)
+    # rc.exe does not report the .ico as a dependency, so an icon change alone
+    # would leave the old icon in an incremental build.
+    set_source_files_properties(resources/shackbench.rc PROPERTIES
+        OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/resources/shackbench.ico)
 elseif(APPLE)
     add_executable(ShackBench MACOSX_BUNDLE ${TCIMON_SOURCES})
 else()
